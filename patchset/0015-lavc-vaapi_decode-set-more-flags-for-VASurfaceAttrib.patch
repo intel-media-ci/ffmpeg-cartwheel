@@ -1,0 +1,27 @@
+From 5a4bde4d9aae347d79da9547fd76415c4caa4e18 Mon Sep 17 00:00:00 2001
+From: Linjie Fu <linjie.fu@intel.com>
+Date: Tue, 3 Dec 2019 16:12:24 +0800
+Subject: [PATCH 15/35] lavc/vaapi_decode: set more flags for VASurfaceAttrib
+
+Wangfei's patch:
+https://patchwork.ffmpeg.org/patch/16332/
+---
+ libavcodec/vaapi_decode.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/libavcodec/vaapi_decode.c b/libavcodec/vaapi_decode.c
+index 435e462..8d5842a 100644
+--- a/libavcodec/vaapi_decode.c
++++ b/libavcodec/vaapi_decode.c
+@@ -362,6 +362,8 @@ static int vaapi_decode_find_best_format(AVCodecContext *avctx,
+ 
+         ctx->pixel_format_attribute = (VASurfaceAttrib) {
+             .type          = VASurfaceAttribPixelFormat,
++            .flags         = VA_SURFACE_ATTRIB_SETTABLE,
++            .value.type    = VAGenericValueTypeInteger,
+             .value.value.i = best_fourcc,
+         };
+ 
+-- 
+2.7.4
+

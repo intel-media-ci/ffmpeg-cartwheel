@@ -1,0 +1,64 @@
+From c7bea748ec5d3d392ffb7b78453dd5aa7a377a77 Mon Sep 17 00:00:00 2001
+From: Linjie Fu <linjie.fu@intel.com>
+Date: Thu, 28 Nov 2019 14:46:17 +0800
+Subject: [PATCH 07/35] lavc/qsvenc: Add support for 4:4:4 8/10 bit HEVC REXT
+ encoding
+
+Enables HEVC Range Extension encoding support for 4:4:4 8/10 bit
+on ICL(gen11 +) platform with VDENC(low power mode).
+
+CMD:
+
+ffmpeg -hwaccel qsv -init_hw_device qsv=hw -filter_hw_device hw -f rawvideo
+    -video_size 1920x1080 -pix_fmt 0yuv -i ./0yuv.yuv
+    -vf hwupload=extra_hw_frames=64,format=qsv -c:v hevc_qsv -profile rext
+    -level 62 -low_power 1 -y ./qsv_444_8.h265
+
+ffmpeg -hwaccel qsv -init_hw_device qsv=hw -filter_hw_device hw
+    -f rawvideo -video_size 400x384 -pix_fmt y410 -i ./y410.yuv
+    -vf hwupload=extra_hw_frames=64,format=qsv -c:v hevc_qsv -profile rext
+    -level 62 -low_power 1 -y ./qsv_444_10.h265
+
+Signed-off-by: Linjie Fu <linjie.fu@intel.com>
+---
+ libavcodec/qsvenc.c      | 4 +++-
+ libavcodec/qsvenc_hevc.c | 1 +
+ 2 files changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/libavcodec/qsvenc.c b/libavcodec/qsvenc.c
+index 5960eef..6ae3fbc 100644
+--- a/libavcodec/qsvenc.c
++++ b/libavcodec/qsvenc.c
+@@ -66,6 +66,7 @@ static const struct {
+     { MFX_PROFILE_HEVC_MAIN,                    "main"                  },
+     { MFX_PROFILE_HEVC_MAIN10,                  "main10"                },
+     { MFX_PROFILE_HEVC_MAINSP,                  "mainsp"                },
++    { MFX_PROFILE_HEVC_REXT,                    "rext"                  },
+ #endif
+ };
+ 
+@@ -538,7 +539,8 @@ static int init_video_param(AVCodecContext *avctx, QSVEncContext *q)
+     q->param.mfx.FrameInfo.CropH          = avctx->height;
+     q->param.mfx.FrameInfo.AspectRatioW   = avctx->sample_aspect_ratio.num;
+     q->param.mfx.FrameInfo.AspectRatioH   = avctx->sample_aspect_ratio.den;
+-    q->param.mfx.FrameInfo.ChromaFormat   = MFX_CHROMAFORMAT_YUV420;
++    q->param.mfx.FrameInfo.ChromaFormat   = MFX_CHROMAFORMAT_YUV420 +
++                                            !desc->log2_chroma_w + !desc->log2_chroma_h;
+     q->param.mfx.FrameInfo.BitDepthLuma   = desc->comp[0].depth;
+     q->param.mfx.FrameInfo.BitDepthChroma = desc->comp[0].depth;
+     q->param.mfx.FrameInfo.Shift          = desc->comp[0].shift > 0;
+diff --git a/libavcodec/qsvenc_hevc.c b/libavcodec/qsvenc_hevc.c
+index 27e2232..298b575 100644
+--- a/libavcodec/qsvenc_hevc.c
++++ b/libavcodec/qsvenc_hevc.c
+@@ -240,6 +240,7 @@ static const AVOption options[] = {
+     { "main",    NULL, 0, AV_OPT_TYPE_CONST, { .i64 = MFX_PROFILE_HEVC_MAIN    }, INT_MIN, INT_MAX,     VE, "profile" },
+     { "main10",  NULL, 0, AV_OPT_TYPE_CONST, { .i64 = MFX_PROFILE_HEVC_MAIN10  }, INT_MIN, INT_MAX,     VE, "profile" },
+     { "mainsp",  NULL, 0, AV_OPT_TYPE_CONST, { .i64 = MFX_PROFILE_HEVC_MAINSP  }, INT_MIN, INT_MAX,     VE, "profile" },
++    { "rext",    NULL, 0, AV_OPT_TYPE_CONST, { .i64 = MFX_PROFILE_HEVC_REXT    }, INT_MIN, INT_MAX,     VE, "profile" },
+ 
+     { "gpb", "1: GPB (generalized P/B frame); 0: regular P frame", OFFSET(qsv.gpb), AV_OPT_TYPE_BOOL, { .i64 = 1 }, 0, 1, VE},
+ 
+-- 
+2.7.4
+
