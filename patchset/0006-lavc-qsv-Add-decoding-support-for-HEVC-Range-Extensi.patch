@@ -1,0 +1,130 @@
+From ee457f149969f478a49d2aa273b865aec1e9c75c Mon Sep 17 00:00:00 2001
+From: Linjie Fu <linjie.fu@intel.com>
+Date: Tue, 10 Sep 2019 16:59:37 +0800
+Subject: [PATCH 06/35] lavc/qsv: Add decoding support for HEVC Range Extension
+
+Add some pix_fmt, fourcc and frame map support for new pixel formats.
+
+This enables decoding support for HEVC Range Extension.
+    4:2:2  8 bit: yuyv422
+    4:2:2 10 bit:    y210
+    4:4:4  8 bit:    0yuv
+    4:4:4 10 bit:    y410
+
+Signed-off-by: Linjie Fu <linjie.fu@intel.com>
+---
+ libavcodec/qsv.c          | 26 ++++++++++++++++++++++++++
+ libavutil/hwcontext_qsv.c | 39 +++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 65 insertions(+)
+
+diff --git a/libavcodec/qsv.c b/libavcodec/qsv.c
+index db98c75..c362ee8 100644
+--- a/libavcodec/qsv.c
++++ b/libavcodec/qsv.c
+@@ -195,6 +195,14 @@ enum AVPixelFormat ff_qsv_map_fourcc(uint32_t fourcc)
+     case MFX_FOURCC_NV12: return AV_PIX_FMT_NV12;
+     case MFX_FOURCC_P010: return AV_PIX_FMT_P010;
+     case MFX_FOURCC_P8:   return AV_PIX_FMT_PAL8;
++    case MFX_FOURCC_YUY2: return AV_PIX_FMT_YUYV422;
++#if QSV_VERSION_ATLEAST(1, 17)
++    case MFX_FOURCC_AYUV: return AV_PIX_FMT_0YUV;
++#endif
++#if QSV_VERSION_ATLEAST(1, 27)
++    case MFX_FOURCC_Y210: return AV_PIX_FMT_Y210;
++    case MFX_FOURCC_Y410: return AV_PIX_FMT_Y410;
++#endif
+     }
+     return AV_PIX_FMT_NONE;
+ }
+@@ -207,6 +215,24 @@ int ff_qsv_map_pixfmt(enum AVPixelFormat format, uint32_t *fourcc)
+     case AV_PIX_FMT_NV12:
+         *fourcc = MFX_FOURCC_NV12;
+         return AV_PIX_FMT_NV12;
++    case AV_PIX_FMT_YUV422P:
++        *fourcc = MFX_FOURCC_YUY2;
++        return AV_PIX_FMT_YUYV422;
++#if QSV_VERSION_ATLEAST(1, 17)
++    case AV_PIX_FMT_0YUV:
++    case AV_PIX_FMT_YUV444P:
++        *fourcc = MFX_FOURCC_AYUV;
++        return AV_PIX_FMT_0YUV;
++#endif
++#if QSV_VERSION_ATLEAST(1, 27)
++    case AV_PIX_FMT_YUV422P10:
++        *fourcc = MFX_FOURCC_Y210;
++        return AV_PIX_FMT_Y210;
++    case AV_PIX_FMT_Y410:
++    case AV_PIX_FMT_YUV444P10:
++        *fourcc = MFX_FOURCC_Y410;
++        return AV_PIX_FMT_Y410;
++#endif
+     case AV_PIX_FMT_YUV420P10:
+     case AV_PIX_FMT_P010:
+         *fourcc = MFX_FOURCC_P010;
+diff --git a/libavutil/hwcontext_qsv.c b/libavutil/hwcontext_qsv.c
+index 9e3f2af..097b185 100644
+--- a/libavutil/hwcontext_qsv.c
++++ b/libavutil/hwcontext_qsv.c
+@@ -44,6 +44,10 @@
+ #include "pixdesc.h"
+ #include "time.h"
+ 
++#define QSV_VERSION_ATLEAST(MAJOR, MINOR)   \
++    (MFX_VERSION_MAJOR > (MAJOR) ||         \
++     MFX_VERSION_MAJOR == (MAJOR) && MFX_VERSION_MINOR >= (MINOR))
++
+ typedef struct QSVDevicePriv {
+     AVBufferRef *child_device_ctx;
+ } QSVDevicePriv;
+@@ -103,6 +107,18 @@ static const struct {
+     { AV_PIX_FMT_BGRA, MFX_FOURCC_RGB4 },
+     { AV_PIX_FMT_P010, MFX_FOURCC_P010 },
+     { AV_PIX_FMT_PAL8, MFX_FOURCC_P8   },
++    { AV_PIX_FMT_YUYV422,
++                       MFX_FOURCC_YUY2 },
++#if QSV_VERSION_ATLEAST(1, 17)
++    { AV_PIX_FMT_0YUV,
++                       MFX_FOURCC_AYUV },
++#endif
++#if QSV_VERSION_ATLEAST(1, 27)
++    { AV_PIX_FMT_Y210,
++                       MFX_FOURCC_Y210 },
++    { AV_PIX_FMT_Y410,
++                       MFX_FOURCC_Y410 },
++#endif
+ };
+ 
+ static uint32_t qsv_fourcc_from_pix_fmt(enum AVPixelFormat pix_fmt)
+@@ -774,6 +790,29 @@ static int map_frame_to_surface(const AVFrame *frame, mfxFrameSurface1 *surface)
+         surface->Data.A = frame->data[0] + 3;
+         break;
+ 
++    case AV_PIX_FMT_YUYV422:
++        surface->Data.Y = frame->data[0];
++        surface->Data.U = frame->data[0] + 1;
++        surface->Data.V = frame->data[0] + 3;
++        break;
++
++    case AV_PIX_FMT_Y210:
++        surface->Data.Y16 = frame->data[0];
++        surface->Data.U16 = frame->data[0] + 2;
++        surface->Data.V16 = frame->data[0] + 6;
++        break;
++
++    case AV_PIX_FMT_0YUV:
++        surface->Data.V = frame->data[0];
++        surface->Data.U = frame->data[0] + 1;
++        surface->Data.Y = frame->data[0] + 2;
++        surface->Data.A = frame->data[0] + 3;
++        break;
++
++    case AV_PIX_FMT_Y410:
++        surface->Data.U = frame->data[0];
++        break;
++
+     default:
+         return MFX_ERR_UNSUPPORTED;
+     }
+-- 
+2.7.4
+

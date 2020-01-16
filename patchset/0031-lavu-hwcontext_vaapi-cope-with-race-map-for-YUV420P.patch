@@ -1,0 +1,74 @@
+From 693ac1a3416c01401e56d0e5d926910324d6241c Mon Sep 17 00:00:00 2001
+From: Linjie Fu <linjie.fu@intel.com>
+Date: Wed, 31 Jul 2019 17:41:53 +0800
+Subject: [PATCH 31/35] lavu/hwcontext_vaapi: cope with race map for YUV420P
+
+There is a race condition for AV_PIX_FMT_YUV420P when mapping from pix_fmt
+to fourcc, both VA_FOURCC_I420 and VA_FOURCC_YV12 could be found by pix_fmt.
+
+Currently, vaapi_get_image_format will go through the query results of
+pix_fmt and returned the first matched result according to the declared
+order in driver.This may leads to a wrong image_format.
+
+Modify to find image_format via fourcc.
+
+Fix vaapi CSC to I420:
+ffmpeg -hwaccel vaapi -vaapi_device /dev/dri/renderD128 -f rawvideo
+-pix_fmt nv12 -s:v 1280x720 -i NV12.yuv -vf
+'format=nv12,hwupload,scale_vaapi=format=yuv420p,hwdownload,format=yuv420p'
+-f rawvideo -vsync passthrough -vframes 10 -y aa.yuv
+
+Reviewed-by: Zhong Li <zhong.li@intel.com>
+Signed-off-by: Linjie Fu <linjie.fu@intel.com>
+---
+ libavutil/hwcontext_vaapi.c | 14 +++++++++++---
+ 1 file changed, 11 insertions(+), 3 deletions(-)
+
+diff --git a/libavutil/hwcontext_vaapi.c b/libavutil/hwcontext_vaapi.c
+index cd215a0..199f425 100644
+--- a/libavutil/hwcontext_vaapi.c
++++ b/libavutil/hwcontext_vaapi.c
+@@ -63,6 +63,7 @@ typedef struct VAAPIDevicePriv {
+ typedef struct VAAPISurfaceFormat {
+     enum AVPixelFormat pix_fmt;
+     VAImageFormat image_format;
++    unsigned int fourcc;
+ } VAAPISurfaceFormat;
+ 
+ typedef struct VAAPIDeviceContext {
+@@ -178,15 +179,21 @@ static int vaapi_get_image_format(AVHWDeviceContext *hwdev,
+                                   VAImageFormat **image_format)
+ {
+     VAAPIDeviceContext *ctx = hwdev->internal->priv;
++    VAAPIFormatDescriptor *desc;
+     int i;
+ 
++    desc = vaapi_format_from_pix_fmt(pix_fmt);
++    if (!desc || !image_format)
++        goto fail;
++
+     for (i = 0; i < ctx->nb_formats; i++) {
+-        if (ctx->formats[i].pix_fmt == pix_fmt) {
+-            if (image_format)
+-                *image_format = &ctx->formats[i].image_format;
++        if (ctx->formats[i].fourcc == desc->fourcc) {
++            *image_format = &ctx->formats[i].image_format;
+             return 0;
+         }
+     }
++
++fail:
+     return AVERROR(EINVAL);
+ }
+ 
+@@ -375,6 +382,7 @@ static int vaapi_device_init(AVHWDeviceContext *hwdev)
+             av_log(hwdev, AV_LOG_DEBUG, "Format %#x -> %s.\n",
+                    fourcc, av_get_pix_fmt_name(pix_fmt));
+             ctx->formats[ctx->nb_formats].pix_fmt      = pix_fmt;
++            ctx->formats[ctx->nb_formats].fourcc       = fourcc;
+             ctx->formats[ctx->nb_formats].image_format = image_list[i];
+             ++ctx->nb_formats;
+         }
+-- 
+2.7.4
+
