@@ -1,0 +1,52 @@
+From 51371f33e5d0beb72fe52373e5192549c2a2c704 Mon Sep 17 00:00:00 2001
+From: Linjie Fu <linjie.fu@intel.com>
+Date: Tue, 10 Sep 2019 17:05:23 +0800
+Subject: [PATCH 05/35] qsv: get FrameInfo.Shift by desc->comp[0].shift
+
+Since Y410 is a pixel format with depth > 8 but shift = 0, get Shift
+info by depth is not quite accurate.
+
+Signed-off-by: Linjie Fu <linjie.fu@intel.com>
+---
+ libavcodec/qsvenc.c       | 4 ++--
+ libavutil/hwcontext_qsv.c | 2 +-
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/libavcodec/qsvenc.c b/libavcodec/qsvenc.c
+index 9e41650..5960eef 100644
+--- a/libavcodec/qsvenc.c
++++ b/libavcodec/qsvenc.c
+@@ -446,7 +446,7 @@ static int init_video_param_jpeg(AVCodecContext *avctx, QSVEncContext *q)
+     q->param.mfx.FrameInfo.ChromaFormat   = MFX_CHROMAFORMAT_YUV420;
+     q->param.mfx.FrameInfo.BitDepthLuma   = desc->comp[0].depth;
+     q->param.mfx.FrameInfo.BitDepthChroma = desc->comp[0].depth;
+-    q->param.mfx.FrameInfo.Shift          = desc->comp[0].depth > 8;
++    q->param.mfx.FrameInfo.Shift          = desc->comp[0].shift > 0;
+ 
+     q->param.mfx.FrameInfo.Width  = FFALIGN(avctx->width, 16);
+     q->param.mfx.FrameInfo.Height = FFALIGN(avctx->height, 16);
+@@ -541,7 +541,7 @@ static int init_video_param(AVCodecContext *avctx, QSVEncContext *q)
+     q->param.mfx.FrameInfo.ChromaFormat   = MFX_CHROMAFORMAT_YUV420;
+     q->param.mfx.FrameInfo.BitDepthLuma   = desc->comp[0].depth;
+     q->param.mfx.FrameInfo.BitDepthChroma = desc->comp[0].depth;
+-    q->param.mfx.FrameInfo.Shift          = desc->comp[0].depth > 8;
++    q->param.mfx.FrameInfo.Shift          = desc->comp[0].shift > 0;
+ 
+     // If the minor version is greater than or equal to 19,
+     // then can use the same alignment settings as H.264 for HEVC
+diff --git a/libavutil/hwcontext_qsv.c b/libavutil/hwcontext_qsv.c
+index b1b6740..9e3f2af 100644
+--- a/libavutil/hwcontext_qsv.c
++++ b/libavutil/hwcontext_qsv.c
+@@ -315,7 +315,7 @@ static int qsv_init_surface(AVHWFramesContext *ctx, mfxFrameSurface1 *surf)
+ 
+     surf->Info.BitDepthLuma   = desc->comp[0].depth;
+     surf->Info.BitDepthChroma = desc->comp[0].depth;
+-    surf->Info.Shift          = desc->comp[0].depth > 8;
++    surf->Info.Shift          = desc->comp[0].shift > 0;
+ 
+     if (desc->log2_chroma_w && desc->log2_chroma_h)
+         surf->Info.ChromaFormat   = MFX_CHROMAFORMAT_YUV420;
+-- 
+2.7.4
+

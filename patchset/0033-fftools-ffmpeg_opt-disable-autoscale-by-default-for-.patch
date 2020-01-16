@@ -1,0 +1,33 @@
+From 7f1018552a27f6066f5e28262e8a2c2e26b68bc8 Mon Sep 17 00:00:00 2001
+From: Linjie Fu <linjie.fu@intel.com>
+Date: Wed, 8 Jan 2020 17:41:49 +0800
+Subject: [PATCH 33/35] fftools/ffmpeg_opt: disable autoscale by default for
+ vaapi vp9
+
+Internal only for vaapi-fits:
+This is a workaround since autoscale option is not merged in ffmpeg
+mainline yet.
+
+Signed-off-by: Linjie Fu <linjie.fu@intel.com>
+---
+ fftools/ffmpeg_opt.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/fftools/ffmpeg_opt.c b/fftools/ffmpeg_opt.c
+index 37083f2..9d20c06 100644
+--- a/fftools/ffmpeg_opt.c
++++ b/fftools/ffmpeg_opt.c
+@@ -827,6 +827,10 @@ static void add_input_streams(OptionsContext *o, AVFormatContext *ic)
+                 if (!strcmp(hwaccel, "nvdec"))
+                     hwaccel = "cuda";
+ 
++                // Disable autoscale for VAAPI VP9 decode
++                if (!strcmp(hwaccel, "vaapi") && ist->dec->id == AV_CODEC_ID_VP9)
++                    ist->autoscale = 0;
++
+                 if (!strcmp(hwaccel, "none"))
+                     ist->hwaccel_id = HWACCEL_NONE;
+                 else if (!strcmp(hwaccel, "auto"))
+-- 
+2.7.4
+
