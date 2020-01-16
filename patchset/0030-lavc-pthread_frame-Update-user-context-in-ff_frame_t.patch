@@ -1,0 +1,47 @@
+From 6cbe1c4ac14e54cc8999c9f76040d87977a06b0b Mon Sep 17 00:00:00 2001
+From: Linjie Fu <linjie.fu@intel.com>
+Date: Tue, 24 Dec 2019 13:34:53 +0800
+Subject: [PATCH 30/35] lavc/pthread_frame: Update user context in
+ ff_frame_thread_free
+
+Resolution/format changes lead to reinitialization of hardware
+accelerations(vaapi/dxva2) with new hwaccel_priv_data in
+the worker-thread. And hwaccel_priv_data in user context won't
+be updated until the resolution changing frame is output.
+
+A termination with "-vframes" just after the reinit will lead to:
+    1. memory leak in worker-thread.
+    2. double free in user-thread while calling avcodec_close().
+
+To reproduce:
+
+ffmpeg -hwaccel vaapi(dxva2) -v verbose -i
+    fate-suite/h264/reinit-large_420_8-to-small_420_8.h264 -pix_fmt nv12
+    -f rawvideo -vsync passthrough -vframes 47 -y out.yuv
+
+Signed-off-by: Linjie Fu <linjie.fu@intel.com>
+---
+ libavcodec/pthread_frame.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/libavcodec/pthread_frame.c b/libavcodec/pthread_frame.c
+index 36ac0ac..8bdd735 100644
+--- a/libavcodec/pthread_frame.c
++++ b/libavcodec/pthread_frame.c
+@@ -657,6 +657,13 @@ void ff_frame_thread_free(AVCodecContext *avctx, int thread_count)
+ 
+     park_frame_worker_threads(fctx, thread_count);
+ 
++    if (fctx->prev_thread && avctx->internal->hwaccel_priv_data !=
++                             fctx->prev_thread->avctx->internal->hwaccel_priv_data) {
++        if (update_context_from_thread(avctx, fctx->prev_thread->avctx, 1) < 0) {
++            av_log(avctx, AV_LOG_ERROR, "Failed to update user thread.\n");
++        }
++    }
++
+     if (fctx->prev_thread && fctx->prev_thread != fctx->threads)
+         if (update_context_from_thread(fctx->threads->avctx, fctx->prev_thread->avctx, 0) < 0) {
+             av_log(avctx, AV_LOG_ERROR, "Final thread update failed\n");
+-- 
+2.7.4
+

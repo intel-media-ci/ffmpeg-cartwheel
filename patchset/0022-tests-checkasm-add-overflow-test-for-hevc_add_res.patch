@@ -1,0 +1,53 @@
+From 5203649a581f5f57d5f212f153294605ba0ba782 Mon Sep 17 00:00:00 2001
+From: Linjie Fu <linjie.fu@intel.com>
+Date: Tue, 10 Dec 2019 13:59:54 +0800
+Subject: [PATCH 22/35] tests/checkasm: add overflow test for hevc_add_res
+
+Add overflow test for hevc_add_res when int16_t coeff = -32768.
+The result of C is good, while ASM is not.
+
+To verify:
+    make fate-checkasm-hevc_add_res
+    ffmpeg/tests/checkasm/checkasm --test=hevc_add_res
+
+./checkasm --test=hevc_add_res
+checkasm: using random seed 679391863
+MMXEXT:
+    hevc_add_res_4x4_8_mmxext (hevc_add_res.c:69)
+  - hevc_add_res.add_residual [FAILED]
+SSE2:
+    hevc_add_res_8x8_8_sse2 (hevc_add_res.c:69)
+    hevc_add_res_16x16_8_sse2 (hevc_add_res.c:69)
+    hevc_add_res_32x32_8_sse2 (hevc_add_res.c:69)
+  - hevc_add_res.add_residual [FAILED]
+AVX:
+    hevc_add_res_8x8_8_avx (hevc_add_res.c:69)
+    hevc_add_res_16x16_8_avx (hevc_add_res.c:69)
+    hevc_add_res_32x32_8_avx (hevc_add_res.c:69)
+  - hevc_add_res.add_residual [FAILED]
+AVX2:
+    hevc_add_res_32x32_8_avx2 (hevc_add_res.c:69)
+  - hevc_add_res.add_residual [FAILED]
+checkasm: 8 of 14 tests have failed
+
+Signed-off-by: Xu Guangxin <guangxin.xu@intel.com>
+Signed-off-by: Linjie Fu <linjie.fu@intel.com>
+---
+ tests/checkasm/hevc_add_res.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/tests/checkasm/hevc_add_res.c b/tests/checkasm/hevc_add_res.c
+index e92c6b4..a6e3b8a 100644
+--- a/tests/checkasm/hevc_add_res.c
++++ b/tests/checkasm/hevc_add_res.c
+@@ -58,6 +58,7 @@ static void check_add_res(HEVCDSPContext h, int bit_depth)
+ 
+         randomize_buffers(res0, size);
+         randomize_buffers2(dst0, size);
++        res0[0] = 0x8000;// overflow test
+         memcpy(res1, res0, sizeof(*res0) * size);
+         memcpy(dst1, dst0, sizeof(int16_t) * size);
+ 
+-- 
+2.7.4
+

@@ -1,0 +1,146 @@
+From 6ec4fa2095a5782d2766b3904d8e602e72a87122 Mon Sep 17 00:00:00 2001
+From: Linjie Fu <linjie.fu@intel.com>
+Date: Mon, 29 Jul 2019 20:56:34 +0800
+Subject: [PATCH 19/35] fftools/ffmpeg_filter: add -autoscale to disable/enable
+ the default scale
+
+Currently, ffmpeg inserts scale filter by default in the filter graph
+to force the whole decoded stream to scale into the same size with the
+first frame. It's not quite make sense in resolution changing cases if
+user wants the rawvideo without any scale.
+
+Using autoscale/noautoscale to indicate whether auto inserting the scale
+filter in the filter graph:
+    -noautoscale or -autoscale 0:
+    disable the default auto scale filter inserting.
+
+Update docs.
+
+Signed-off-by: U. Artie Eoff <ullysses.a.eoff@intel.com>
+Signed-off-by: Linjie Fu <linjie.fu@intel.com>
+---
+ doc/ffmpeg.texi         | 16 ++++++++++++----
+ fftools/ffmpeg.c        |  1 +
+ fftools/ffmpeg.h        |  4 ++++
+ fftools/ffmpeg_filter.c |  2 +-
+ fftools/ffmpeg_opt.c    |  8 ++++++++
+ 5 files changed, 26 insertions(+), 5 deletions(-)
+
+diff --git a/doc/ffmpeg.texi b/doc/ffmpeg.texi
+index dd461c0..716dd2c 100644
+--- a/doc/ffmpeg.texi
++++ b/doc/ffmpeg.texi
+@@ -734,10 +734,6 @@ ffmpeg -dump_attachment:t "" -i INPUT
+ Technical note -- attachments are implemented as codec extradata, so this
+ option can actually be used to extract extradata from any stream, not just
+ attachments.
+-
+-@item -noautorotate
+-Disable automatically rotating video based on file metadata.
+-
+ @end table
+ 
+ @section Video Options
+@@ -819,6 +815,18 @@ Create the filtergraph specified by @var{filtergraph} and use it to
+ filter the stream.
+ 
+ This is an alias for @code{-filter:v}, see the @ref{filter_option,,-filter option}.
++
++@item -autorotate
++Automatically rotate the video according to file metadata. Enabled by
++default, use @option{-noautorotate} to disable it.
++
++@item -autoscale
++Automatically scale the video according to the resolution of first frame.
++Enabled by default, use @option{-noautoscale} to disable it. When autoscale is
++disabled, all output frames of filter graph might not be in the same resolution
++and may be inadequate for some encoder/muxer. Therefore, it is not recommended
++to disable it unless you really know what you are doing.
++Disable autoscale at your own risk.
+ @end table
+ 
+ @section Advanced Video options
+diff --git a/fftools/ffmpeg.c b/fftools/ffmpeg.c
+index 6bcd7b9..864c1fb 100644
+--- a/fftools/ffmpeg.c
++++ b/fftools/ffmpeg.c
+@@ -2125,6 +2125,7 @@ static int ifilter_send_frame(InputFilter *ifilter, AVFrame *frame)
+ 
+     /* determine if the parameters for this input changed */
+     need_reinit = ifilter->format != frame->format;
++    fg->autoscale = ifilter->ist->autoscale;
+ 
+     switch (ifilter->ist->st->codecpar->codec_type) {
+     case AVMEDIA_TYPE_AUDIO:
+diff --git a/fftools/ffmpeg.h b/fftools/ffmpeg.h
+index 7b6f802..1602406 100644
+--- a/fftools/ffmpeg.h
++++ b/fftools/ffmpeg.h
+@@ -133,6 +133,8 @@ typedef struct OptionsContext {
+     int        nb_hwaccel_output_formats;
+     SpecifierOpt *autorotate;
+     int        nb_autorotate;
++    SpecifierOpt *autoscale;
++    int        nb_autoscale;
+ 
+     /* output options */
+     StreamMap *stream_maps;
+@@ -285,6 +287,7 @@ typedef struct FilterGraph {
+ 
+     AVFilterGraph *graph;
+     int reconfiguration;
++    int autoscale;
+ 
+     InputFilter   **inputs;
+     int          nb_inputs;
+@@ -335,6 +338,7 @@ typedef struct InputStream {
+     int guess_layout_max;
+ 
+     int autorotate;
++    int autoscale;
+ 
+     int fix_sub_duration;
+     struct { /* previous decoded subtitle and related variables */
+diff --git a/fftools/ffmpeg_filter.c b/fftools/ffmpeg_filter.c
+index 40cc4c1..dafcab7 100644
+--- a/fftools/ffmpeg_filter.c
++++ b/fftools/ffmpeg_filter.c
+@@ -469,7 +469,7 @@ static int configure_output_video_filter(FilterGraph *fg, OutputFilter *ofilter,
+     if (ret < 0)
+         return ret;
+ 
+-    if (ofilter->width || ofilter->height) {
++    if ((ofilter->width || ofilter->height) && fg->autoscale) {
+         char args[255];
+         AVFilterContext *filter;
+         AVDictionaryEntry *e = NULL;
+diff --git a/fftools/ffmpeg_opt.c b/fftools/ffmpeg_opt.c
+index 1510e02..37083f2 100644
+--- a/fftools/ffmpeg_opt.c
++++ b/fftools/ffmpeg_opt.c
+@@ -743,7 +743,9 @@ static void add_input_streams(OptionsContext *o, AVFormatContext *ic)
+         MATCH_PER_STREAM_OPT(ts_scale, dbl, ist->ts_scale, ic, st);
+ 
+         ist->autorotate = 1;
++        ist->autoscale  = 1;
+         MATCH_PER_STREAM_OPT(autorotate, i, ist->autorotate, ic, st);
++        MATCH_PER_STREAM_OPT(autoscale, i, ist->autoscale, ic, st);
+ 
+         MATCH_PER_STREAM_OPT(codec_tags, str, codec_tag, ic, st);
+         if (codec_tag) {
+@@ -3650,6 +3652,12 @@ const OptionDef options[] = {
+     { "autorotate",       HAS_ARG | OPT_BOOL | OPT_SPEC |
+                           OPT_EXPERT | OPT_INPUT,                                { .off = OFFSET(autorotate) },
+         "automatically insert correct rotate filters" },
++    { "autoscale",        HAS_ARG | OPT_BOOL | OPT_SPEC |
++                          OPT_EXPERT | OPT_INPUT,                                { .off = OFFSET(autoscale) },
++        "automatically insert a scale filter at the end of the filter graph if a resolution"
++        "change is detected. This ensures all frames are the same resolution as the first frame"
++        "when they leave the filter chain (this option is enabled by default)."
++        "If disabled, some encoders/muxers may not support this mode."},
+ 
+     /* audio options */
+     { "aframes",        OPT_AUDIO | HAS_ARG  | OPT_PERFILE | OPT_OUTPUT,           { .func_arg = opt_audio_frames },
+-- 
+2.7.4
+

@@ -1,0 +1,73 @@
+From 7cb18025adadda0b6b5ed54e299eff9c52e9e362 Mon Sep 17 00:00:00 2001
+From: Linjie Fu <linjie.fu@intel.com>
+Date: Mon, 9 Dec 2019 12:25:17 +0800
+Subject: [PATCH 23/35] lavc/x86/hevc_add_res: Fix overflow in ADD_RES_MMX_4_8
+
+Fix overflow for coeff -32768 in function ADD_RES_MMX_4_8 with no
+performance drop.
+
+./checkasm --test=hevc_add_res --bench
+
+Mainline:
+  - hevc_add_res.add_residual [OK]
+    hevc_add_res_4x4_8_mmxext: 15.5
+
+Add overflow test case:
+  - hevc_add_res.add_residual [FAILED]
+
+After:
+  - hevc_add_res.add_residual [OK]
+    hevc_add_res_4x4_8_mmxext: 15.0
+
+Signed-off-by: Xu Guangxin <guangxin.xu@intel.com>
+Signed-off-by: Linjie Fu <linjie.fu@intel.com>
+---
+ libavcodec/x86/hevc_add_res.asm | 23 +++++++++++------------
+ 1 file changed, 11 insertions(+), 12 deletions(-)
+
+diff --git a/libavcodec/x86/hevc_add_res.asm b/libavcodec/x86/hevc_add_res.asm
+index 36d4d8e..249c607 100644
+--- a/libavcodec/x86/hevc_add_res.asm
++++ b/libavcodec/x86/hevc_add_res.asm
+@@ -30,27 +30,26 @@ cextern pw_1023
+ %macro ADD_RES_MMX_4_8 0
+     mova              m0, [r1]
+     mova              m2, [r1+8]
+-    pxor              m1, m1
+-    pxor              m3, m3
+-    psubw             m1, m0
+-    psubw             m3, m2
+-    packuswb          m0, m2
+-    packuswb          m1, m3
+ 
+-    movd              m2, [r0]
++    movd              m1, [r0]
+     movd              m3, [r0+r2]
+-    punpckldq         m2, m3
+-    paddusb           m0, m2
+-    psubusb           m0, m1
++    punpcklbw         m1, m4
++    punpcklbw         m3, m4
++
++    paddsw            m0, m1
++    paddsw            m2, m3
++    packuswb          m0, m4
++    packuswb          m2, m4
++
+     movd            [r0], m0
+-    psrlq             m0, 32
+-    movd         [r0+r2], m0
++    movd         [r0+r2], m2
+ %endmacro
+ 
+ 
+ INIT_MMX mmxext
+ ; void ff_hevc_add_residual_4_8_mmxext(uint8_t *dst, int16_t *res, ptrdiff_t stride)
+ cglobal hevc_add_residual_4_8, 3, 3, 6
++    pxor              m4, m4
+     ADD_RES_MMX_4_8
+     add               r1, 16
+     lea               r0, [r0+r2*2]
+-- 
+2.7.4
+

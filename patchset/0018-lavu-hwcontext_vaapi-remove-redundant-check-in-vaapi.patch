@@ -1,0 +1,38 @@
+From 4726674699fc5ccf4d96973a175cba682c573d08 Mon Sep 17 00:00:00 2001
+From: Linjie Fu <linjie.fu@intel.com>
+Date: Thu, 19 Dec 2019 10:02:35 +0800
+Subject: [PATCH 18/35] lavu/hwcontext_vaapi: remove redundant check in
+ vaapi_map_to_memory
+
+vaapi_get_image_format() will be called in vaapi_map_frame(), so it's
+redundant here. Also, NULL for VAImageFormat **image_format could be
+a bit improper since the function is supposed to be used to get the
+image format.
+
+Remove vaapi_get_image_format() in vaapi_map_to_memory().
+
+Signed-off-by: Linjie Fu <linjie.fu@intel.com>
+---
+ libavutil/hwcontext_vaapi.c | 6 ------
+ 1 file changed, 6 deletions(-)
+
+diff --git a/libavutil/hwcontext_vaapi.c b/libavutil/hwcontext_vaapi.c
+index 296234b..cd215a0 100644
+--- a/libavutil/hwcontext_vaapi.c
++++ b/libavutil/hwcontext_vaapi.c
+@@ -939,12 +939,6 @@ static int vaapi_map_to_memory(AVHWFramesContext *hwfc, AVFrame *dst,
+ {
+     int err;
+ 
+-    if (dst->format != AV_PIX_FMT_NONE) {
+-        err = vaapi_get_image_format(hwfc->device_ctx, dst->format, NULL);
+-        if (err < 0)
+-            return AVERROR(ENOSYS);
+-    }
+-
+     err = vaapi_map_frame(hwfc, dst, src, flags);
+     if (err)
+         return err;
+-- 
+2.7.4
+
