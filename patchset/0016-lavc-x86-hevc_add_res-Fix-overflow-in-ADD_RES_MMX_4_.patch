@@ -1,7 +1,7 @@
-From 7cb18025adadda0b6b5ed54e299eff9c52e9e362 Mon Sep 17 00:00:00 2001
+From 87ad0ad8ef37982399cdd9291f343f268dbd658b Mon Sep 17 00:00:00 2001
 From: Linjie Fu <linjie.fu@intel.com>
 Date: Mon, 9 Dec 2019 12:25:17 +0800
-Subject: [PATCH 23/35] lavc/x86/hevc_add_res: Fix overflow in ADD_RES_MMX_4_8
+Subject: [PATCH 16/28] lavc/x86/hevc_add_res: Fix overflow in ADD_RES_MMX_4_8
 
 Fix overflow for coeff -32768 in function ADD_RES_MMX_4_8 with no
 performance drop.

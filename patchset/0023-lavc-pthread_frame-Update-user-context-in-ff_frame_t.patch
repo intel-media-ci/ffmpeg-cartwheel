@@ -1,7 +1,7 @@
-From 6cbe1c4ac14e54cc8999c9f76040d87977a06b0b Mon Sep 17 00:00:00 2001
+From 42206609afbf63ce04e8cd9992e4dba11dcaf41c Mon Sep 17 00:00:00 2001
 From: Linjie Fu <linjie.fu@intel.com>
 Date: Tue, 24 Dec 2019 13:34:53 +0800
-Subject: [PATCH 30/35] lavc/pthread_frame: Update user context in
+Subject: [PATCH 23/28] lavc/pthread_frame: Update user context in
  ff_frame_thread_free
 
 Resolution/format changes lead to reinitialization of hardware
@@ -25,10 +25,10 @@ Signed-off-by: Linjie Fu <linjie.fu@intel.com>
  1 file changed, 7 insertions(+)
 
 diff --git a/libavcodec/pthread_frame.c b/libavcodec/pthread_frame.c
-index 36ac0ac..8bdd735 100644
+index b5bd494..172731a 100644
 --- a/libavcodec/pthread_frame.c
 +++ b/libavcodec/pthread_frame.c
-@@ -657,6 +657,13 @@ void ff_frame_thread_free(AVCodecContext *avctx, int thread_count)
+@@ -658,6 +658,13 @@ void ff_frame_thread_free(AVCodecContext *avctx, int thread_count)
  
      park_frame_worker_threads(fctx, thread_count);
  

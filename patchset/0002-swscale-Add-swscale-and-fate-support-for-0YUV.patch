@@ -1,7 +1,7 @@
-From ea4f37f7bbe657e30b612c01734b7bc3d3ebdd36 Mon Sep 17 00:00:00 2001
+From 70a7054a2e691485e201d6df29cf260bb27043e9 Mon Sep 17 00:00:00 2001
 From: Linjie Fu <linjie.fu@intel.com>
 Date: Mon, 2 Dec 2019 14:42:11 +0800
-Subject: [PATCH 02/35] swscale: Add swscale and fate support for 0YUV
+Subject: [PATCH 02/28] swscale: Add swscale and fate support for 0YUV
 
 Add input and output support in swscale for 0YUV.
 
@@ -33,11 +33,11 @@ Signed-off-by: Linjie Fu <linjie.fu@intel.com>
  create mode 100644 tests/ref/fate/filter-pixdesc-0yuv
 
 diff --git a/libswscale/input.c b/libswscale/input.c
-index 064f8da..4973b8c 100644
+index 8346cf4..4735a1f 100644
 --- a/libswscale/input.c
 +++ b/libswscale/input.c
-@@ -552,6 +552,25 @@ static void yvy2ToUV_c(uint8_t *dstU, uint8_t *dstV, const uint8_t *unused0, con
-     av_assert1(src1 == src2);
+@@ -570,6 +570,25 @@ static void y210le_Y_c(uint8_t *dst, const uint8_t *src, const uint8_t *unused0,
+         AV_WN16(dst + i * 2, AV_RL16(src + i * 4) >> 6);
  }
  
 +static void XyuvToY_c(uint8_t *dst, const uint8_t *src, const uint8_t *unused1, const uint8_t *unused2,  int width,
@@ -62,9 +62,9 @@ index 064f8da..4973b8c 100644
  static void bswap16Y_c(uint8_t *_dst, const uint8_t *_src, const uint8_t *unused1, const uint8_t *unused2, int width,
                         uint32_t *unused)
  {
-@@ -1154,6 +1173,9 @@ av_cold void ff_sws_init_input_funcs(SwsContext *c)
-     case AV_PIX_FMT_P016BE:
-         c->chrToYV12 = p016BEToUV_c;
+@@ -1175,6 +1194,9 @@ av_cold void ff_sws_init_input_funcs(SwsContext *c)
+     case AV_PIX_FMT_Y210LE:
+         c->chrToYV12 = y210le_UV_c;
          break;
 +    case AV_PIX_FMT_0YUV:
 +        c->chrToYV12 = XyuvToUV_c;
@@ -72,9 +72,9 @@ index 064f8da..4973b8c 100644
      }
      if (c->chrSrcHSubSample) {
          switch (srcFormat) {
-@@ -1586,6 +1608,9 @@ av_cold void ff_sws_init_input_funcs(SwsContext *c)
-         c->lumToYV12 = grayf32ToY16_bswap_c;
- #endif
+@@ -1610,6 +1632,9 @@ av_cold void ff_sws_init_input_funcs(SwsContext *c)
+     case AV_PIX_FMT_Y210LE:
+         c->lumToYV12 = y210le_Y_c;
          break;
 +    case AV_PIX_FMT_0YUV:
 +        c->lumToYV12 = XyuvToY_c;
@@ -83,7 +83,7 @@ index 064f8da..4973b8c 100644
      if (c->needAlpha) {
          if (is16BPS(srcFormat) || isNBPS(srcFormat)) {
 diff --git a/libswscale/output.c b/libswscale/output.c
-index d192ea8..e18955d 100644
+index a793a89..84f27df 100644
 --- a/libswscale/output.c
 +++ b/libswscale/output.c
 @@ -2406,6 +2406,53 @@ yuv2ya8_X_c(SwsContext *c, const int16_t *lumFilter,
@@ -209,13 +209,13 @@ index 67440cd..b00824b 100644
      if (srcFormat == AV_PIX_FMT_GRAY8 && dstFormat == AV_PIX_FMT_GRAYF32){
          c->swscale = uint_y_to_float_y_wrapper;
 diff --git a/libswscale/utils.c b/libswscale/utils.c
-index b2c08a5..ab31247 100644
+index bb3495b..c733e2a 100644
 --- a/libswscale/utils.c
 +++ b/libswscale/utils.c
-@@ -266,6 +266,7 @@ static const FormatEntry format_entries[] = {
-     [AV_PIX_FMT_YUVA444P12LE] = { 1, 1 },
+@@ -267,6 +267,7 @@ static const FormatEntry format_entries[] = {
      [AV_PIX_FMT_NV24]        = { 1, 1 },
      [AV_PIX_FMT_NV42]        = { 1, 1 },
+     [AV_PIX_FMT_Y210LE]      = { 1, 0 },
 +    [AV_PIX_FMT_0YUV]        = { 1, 1 },
  };
  

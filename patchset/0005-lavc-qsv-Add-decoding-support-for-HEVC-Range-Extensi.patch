@@ -1,7 +1,7 @@
-From ee457f149969f478a49d2aa273b865aec1e9c75c Mon Sep 17 00:00:00 2001
+From 5b8137699960b500320d9b905e6898f94532feeb Mon Sep 17 00:00:00 2001
 From: Linjie Fu <linjie.fu@intel.com>
 Date: Tue, 10 Sep 2019 16:59:37 +0800
-Subject: [PATCH 06/35] lavc/qsv: Add decoding support for HEVC Range Extension
+Subject: [PATCH 05/28] lavc/qsv: Add decoding support for HEVC Range Extension
 
 Add some pix_fmt, fourcc and frame map support for new pixel formats.
 

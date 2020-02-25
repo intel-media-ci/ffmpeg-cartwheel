@@ -1,7 +1,7 @@
-From 8c8e98127cb9179089b3781a7314dbe3826d220c Mon Sep 17 00:00:00 2001
+From bde32858b04a5f5006360f23fae2f2d39871857e Mon Sep 17 00:00:00 2001
 From: Linjie Fu <linjie.fu@intel.com>
 Date: Wed, 31 Jul 2019 12:02:26 +0800
-Subject: [PATCH 20/35] fftools/ffmpeg: support variable resolution encode
+Subject: [PATCH 13/28] fftools/ffmpeg: support variable resolution encode
 
 Flush encoders when resolution change happens.
 
@@ -15,7 +15,7 @@ Signed-off-by: Linjie Fu <linjie.fu@intel.com>
  2 files changed, 15 insertions(+)
 
 diff --git a/fftools/ffmpeg.c b/fftools/ffmpeg.c
-index 864c1fb..d94691d 100644
+index def19c1..cd8f897 100644
 --- a/fftools/ffmpeg.c
 +++ b/fftools/ffmpeg.c
 @@ -130,6 +130,7 @@ static void do_video_stats(OutputStream *ost, int frame_size);

@@ -1,0 +1,30 @@
+From 9eadc19133d03e40d9b05b3dee79a7e78c3fd0bb Mon Sep 17 00:00:00 2001
+From: Linjie Fu <linjie.fu@intel.com>
+Date: Tue, 25 Feb 2020 11:23:19 +0800
+Subject: [PATCH 25/28] lavu/hwcontext_qsv: fix some warnings
+
+Signed-off-by: Linjie Fu <linjie.fu@intel.com>
+---
+ libavutil/hwcontext_qsv.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/libavutil/hwcontext_qsv.c b/libavutil/hwcontext_qsv.c
+index 097b185..5bc5219 100644
+--- a/libavutil/hwcontext_qsv.c
++++ b/libavutil/hwcontext_qsv.c
+@@ -797,9 +797,9 @@ static int map_frame_to_surface(const AVFrame *frame, mfxFrameSurface1 *surface)
+         break;
+ 
+     case AV_PIX_FMT_Y210:
+-        surface->Data.Y16 = frame->data[0];
+-        surface->Data.U16 = frame->data[0] + 2;
+-        surface->Data.V16 = frame->data[0] + 6;
++        surface->Data.Y16 = (mfxU16 *)(frame->data[0]);
++        surface->Data.U16 = (mfxU16 *)(frame->data[0] + 2);
++        surface->Data.V16 = (mfxU16 *)(frame->data[0] + 6);
+         break;
+ 
+     case AV_PIX_FMT_0YUV:
+-- 
+2.7.4
+
