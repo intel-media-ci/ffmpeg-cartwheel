@@ -1,7 +1,7 @@
-From 4887ba165bc414d30518eefe829e700db56b42cf Mon Sep 17 00:00:00 2001
+From fb28c8ca006169f4b4fd1d55f32faad786be6202 Mon Sep 17 00:00:00 2001
 From: Linjie Fu <linjie.fu@intel.com>
 Date: Thu, 2 Jan 2020 11:06:45 +0800
-Subject: [PATCH 27/35] lavc/decode: Add get_hw_config function
+Subject: [PATCH 20/28] lavc/decode: Add get_hw_config function
 
 Wrap the procedure of getting the hardware config from a pixel format
 into a function.
