@@ -1,16 +1,15 @@
-From 90bfd9654a037674a34921d4e897859f00f48bfa Mon Sep 17 00:00:00 2001
+From 80894058855894de05706b99a963c341d9c191bb Mon Sep 17 00:00:00 2001
 From: Linjie Fu <linjie.fu@intel.com>
 Date: Mon, 2 Dec 2019 13:50:46 +0800
-Subject: [PATCH 01/35] lavu/pixfmt: add new pixel format 0yuv/y210/y410
+Subject: [PATCH 01/28] lavu/pixfmt: add new pixel format 0yuv/y410
 
 Previously, media driver provided planar format(like 420 8 bit),
-but for HEVC Range Extension (422/444 8/10 bit), the decoded image
+but for HEVC Range Extension (444 8/10 bit), the decoded image
 is produced in packed format because Windows expects it.
 
 Add some packed pixel formats for hardware decode support in VAAPI
 and QSV:
 
-4:2:2 10 bit: Y210
 4:4:4  8 bit: 0YUV
 4:4:4 10 bit: Y410
 
@@ -18,42 +17,19 @@ Add query support in fate and update the minor version.
 
 Signed-off-by: Linjie Fu <linjie.fu@intel.com>
 ---
- libavutil/pixdesc.c              | 60 ++++++++++++++++++++++++++++++++++++++++
- libavutil/pixfmt.h               |  9 ++++++
- tests/ref/fate/sws-pixdesc-query | 18 ++++++++++++
- 3 files changed, 87 insertions(+)
+ libavutil/pixdesc.c              | 37 +++++++++++++++++++++++++++++++++++++
+ libavutil/pixfmt.h               |  5 +++++
+ tests/ref/fate/sws-pixdesc-query | 11 +++++++++++
+ 3 files changed, 53 insertions(+)
 
 diff --git a/libavutil/pixdesc.c b/libavutil/pixdesc.c
-index 05dd4a1..5fa934f 100644
+index 9d61c52..89075e6 100644
 --- a/libavutil/pixdesc.c
 +++ b/libavutil/pixdesc.c
-@@ -205,6 +205,66 @@ static const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
-             { 0, 4, 1, 0, 8, 3, 7, 2 },        /* V */
+@@ -228,6 +228,43 @@ static const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
          },
+         .flags = AV_PIX_FMT_FLAG_BE,
      },
-+    [AV_PIX_FMT_Y210LE] = {
-+        .name = "y210le",
-+        .nb_components = 3,
-+        .log2_chroma_w = 1,
-+        .log2_chroma_h = 0,
-+        .comp = {
-+            { 0, 4, 0, 6, 10, 3, 9, 1 },        /* Y */
-+            { 0, 8, 2, 6, 10, 7, 9, 3 },        /* U */
-+            { 0, 8, 6, 6, 10, 7, 9, 7 },        /* V */
-+        },
-+    },
-+    [AV_PIX_FMT_Y210BE] = {
-+        .name = "y210be",
-+        .nb_components = 3,
-+        .log2_chroma_w = 1,
-+        .log2_chroma_h = 0,
-+        .comp = {
-+            { 0, 4, 0, 6, 10, 3, 9, 1 },        /* Y */
-+            { 0, 8, 2, 6, 10, 7, 9, 3 },        /* U */
-+            { 0, 8, 6, 6, 10, 7, 9, 7 },        /* V */
-+        },
-+        .flags = AV_PIX_FMT_FLAG_BE,
-+    },
 +    [AV_PIX_FMT_0YUV] = {
 +        .name = "0yuv",
 +        .nb_components = 3,
@@ -95,15 +71,13 @@ index 05dd4a1..5fa934f 100644
          .name = "rgb24",
          .nb_components = 3,
 diff --git a/libavutil/pixfmt.h b/libavutil/pixfmt.h
-index 37ecebd..1e6c48e 100644
+index 1c625cf..4264c45 100644
 --- a/libavutil/pixfmt.h
 +++ b/libavutil/pixfmt.h
-@@ -348,6 +348,12 @@ enum AVPixelFormat {
-     AV_PIX_FMT_NV24,      ///< planar YUV 4:4:4, 24bpp, 1 plane for Y and 1 plane for the UV components, which are interleaved (first byte U and the following byte V)
-     AV_PIX_FMT_NV42,      ///< as above, but U and V bytes are swapped
+@@ -358,6 +358,10 @@ enum AVPixelFormat {
+     AV_PIX_FMT_Y210BE,    ///< packed YUV 4:2:2 like YUYV422, 20bpp, data in the high bits, big-endian
+     AV_PIX_FMT_Y210LE,    ///< packed YUV 4:2:2 like YUYV422, 20bpp, data in the high bits, little-endian
  
-+    AV_PIX_FMT_Y210BE,    ///< packed YUV 4:2:2, 32bpp, Y0 Cb Y1 Cr, big-endian
-+    AV_PIX_FMT_Y210LE,    ///< packed YUV 4:2:2, 32bpp, Y0 Cb Y1 Cr, little-endian
 +    AV_PIX_FMT_0YUV,      ///< packed YUV 4:4:4, 32bpp,  X  Y Cb Cr, X=unused/undefined
 +    AV_PIX_FMT_Y410LE,    ///< packed YUV 4:4:4, 32bpp, Cr  Y Cb  A, little-endian
 +    AV_PIX_FMT_Y410BE,    ///< packed YUV 4:4:4, 32bpp, Cr  Y Cb  A, big-endian
@@ -111,41 +85,36 @@ index 37ecebd..1e6c48e 100644
      AV_PIX_FMT_NB         ///< number of pixel formats, DO NOT USE THIS if you want to link with shared libav* because the number of formats might differ between versions
  };
  
-@@ -436,6 +442,9 @@ enum AVPixelFormat {
- #define AV_PIX_FMT_P010       AV_PIX_FMT_NE(P010BE,  P010LE)
+@@ -447,6 +451,7 @@ enum AVPixelFormat {
  #define AV_PIX_FMT_P016       AV_PIX_FMT_NE(P016BE,  P016LE)
  
-+#define AV_PIX_FMT_Y210       AV_PIX_FMT_NE(Y210BE,  Y210LE)
+ #define AV_PIX_FMT_Y210       AV_PIX_FMT_NE(Y210BE,  Y210LE)
 +#define AV_PIX_FMT_Y410       AV_PIX_FMT_NE(Y410BE,  Y410LE)
-+
+ 
  /**
    * Chromaticity coordinates of the source primaries.
-   * These values match the ones defined by ISO/IEC 23001-8_2013 § 7.1.
 diff --git a/tests/ref/fate/sws-pixdesc-query b/tests/ref/fate/sws-pixdesc-query
-index e234922..d0efa92 100644
+index bc9a0d8..d0efa92 100644
 --- a/tests/ref/fate/sws-pixdesc-query
 +++ b/tests/ref/fate/sws-pixdesc-query
-@@ -59,6 +59,10 @@ isNBPS:
-   p010le
-   xyz12be
+@@ -61,6 +61,8 @@ isNBPS:
    xyz12le
-+  y210be
-+  y210le
+   y210be
+   y210le
 +  y410be
 +  y410le
    yuv420p10be
    yuv420p10le
    yuv420p12be
-@@ -140,6 +144,8 @@ isBE:
-   rgb565be
+@@ -143,6 +145,7 @@ isBE:
    rgba64be
    xyz12be
-+  y210be
+   y210be
 +  y410be
    ya16be
    yuv420p10be
    yuv420p12be
-@@ -171,6 +177,7 @@ isBE:
+@@ -174,6 +177,7 @@ isBE:
    yuva444p9be
  
  isYUV:
@@ -153,18 +122,16 @@ index e234922..d0efa92 100644
    ayuv64be
    ayuv64le
    nv12
-@@ -188,6 +195,10 @@ isYUV:
-   uyyvyy411
-   xyz12be
+@@ -193,6 +197,8 @@ isYUV:
    xyz12le
-+  y210be
-+  y210le
+   y210be
+   y210le
 +  y410be
 +  y410le
    ya16be
    ya16le
    ya8
-@@ -599,6 +610,8 @@ ALPHA:
+@@ -604,6 +610,8 @@ ALPHA:
    rgb32_1
    rgba64be
    rgba64le
@@ -173,7 +140,7 @@ index e234922..d0efa92 100644
    ya16be
    ya16le
    ya8
-@@ -631,6 +644,7 @@ ALPHA:
+@@ -636,6 +644,7 @@ ALPHA:
  Packed:
    0bgr
    0rgb
@@ -181,12 +148,10 @@ index e234922..d0efa92 100644
    ayuv64be
    ayuv64le
    bayer_bggr16be
-@@ -686,6 +700,10 @@ Packed:
-   uyyvyy411
-   xyz12be
+@@ -693,6 +702,8 @@ Packed:
    xyz12le
-+  y210be
-+  y210le
+   y210be
+   y210le
 +  y410be
 +  y410le
    ya16be

@@ -1,0 +1,33 @@
+From 531d54f65240b974e311ea9135978d7792de709e Mon Sep 17 00:00:00 2001
+From: Linjie Fu <linjie.fu@intel.com>
+Date: Tue, 25 Feb 2020 11:38:51 +0800
+Subject: [PATCH 27/28] lavc/qsv: add encoding support 4:2:2 8/10 bit
+
+Signed-off-by: Linjie Fu <linjie.fu@intel.com>
+---
+ libavcodec/qsv.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/libavcodec/qsv.c b/libavcodec/qsv.c
+index c362ee8..cff75b8 100644
+--- a/libavcodec/qsv.c
++++ b/libavcodec/qsv.c
+@@ -216,6 +216,7 @@ int ff_qsv_map_pixfmt(enum AVPixelFormat format, uint32_t *fourcc)
+         *fourcc = MFX_FOURCC_NV12;
+         return AV_PIX_FMT_NV12;
+     case AV_PIX_FMT_YUV422P:
++    case AV_PIX_FMT_YUYV422:
+         *fourcc = MFX_FOURCC_YUY2;
+         return AV_PIX_FMT_YUYV422;
+ #if QSV_VERSION_ATLEAST(1, 17)
+@@ -226,6 +227,7 @@ int ff_qsv_map_pixfmt(enum AVPixelFormat format, uint32_t *fourcc)
+ #endif
+ #if QSV_VERSION_ATLEAST(1, 27)
+     case AV_PIX_FMT_YUV422P10:
++    case AV_PIX_FMT_Y210:
+         *fourcc = MFX_FOURCC_Y210;
+         return AV_PIX_FMT_Y210;
+     case AV_PIX_FMT_Y410:
+-- 
+2.7.4
+
