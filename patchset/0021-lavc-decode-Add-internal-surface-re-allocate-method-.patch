@@ -1,7 +1,7 @@
-From 93c071b7667f686d50a938713424d7895816313b Mon Sep 17 00:00:00 2001
+From 925d2ce3d8b57a70f8bf2de521e96e4b28996ecd Mon Sep 17 00:00:00 2001
 From: Linjie Fu <linjie.fu@intel.com>
 Date: Thu, 2 Jan 2020 11:12:15 +0800
-Subject: [PATCH 28/35] lavc/decode: Add internal surface re-allocate method
+Subject: [PATCH 21/28] lavc/decode: Add internal surface re-allocate method
  for hwaccel
 
 Add HWACCEL_CAP_INTERNAL_ALLOC flag to indicate hwaccels are able to

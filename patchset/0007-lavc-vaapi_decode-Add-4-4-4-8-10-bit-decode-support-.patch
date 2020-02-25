@@ -1,7 +1,7 @@
-From 254719ffd3fee82a49e794bf10bd043b2efdf7d6 Mon Sep 17 00:00:00 2001
+From 680c268b01ed12f5213bd98387229c183bf24e6b Mon Sep 17 00:00:00 2001
 From: Linjie Fu <linjie.fu@intel.com>
 Date: Fri, 20 Sep 2019 10:07:02 +0800
-Subject: [PATCH 13/35] lavc/vaapi_decode: Add 4:4:4 8/10 bit decode support
+Subject: [PATCH 07/28] lavc/vaapi_decode: Add 4:4:4 8/10 bit decode support
  for VP9
 
 VP9 4:4:4 8 bit and 10 bit decode are supported since Ice Lake.
@@ -13,16 +13,16 @@ Signed-off-by: Linjie Fu <linjie.fu@intel.com>
  2 files changed, 8 insertions(+)
 
 diff --git a/libavcodec/vaapi_decode.c b/libavcodec/vaapi_decode.c
-index ce53b06..435e462 100644
+index 54a0ecb..fbe4860 100644
 --- a/libavcodec/vaapi_decode.c
 +++ b/libavcodec/vaapi_decode.c
-@@ -413,7 +413,9 @@ static const struct {
-     MAP(VP9,         VP9_0,           VP9Profile0 , NULL ),
+@@ -408,7 +408,9 @@ static const struct {
+     MAP(VP9,         VP9_0,           VP9Profile0 ),
  #endif
  #if VA_CHECK_VERSION(0, 39, 0)
-+    MAP(VP9,         VP9_1,           VP9Profile1 , NULL ),
-     MAP(VP9,         VP9_2,           VP9Profile2 , NULL ),
-+    MAP(VP9,         VP9_3,           VP9Profile3 , NULL ),
++    MAP(VP9,         VP9_1,           VP9Profile1 ),
+     MAP(VP9,         VP9_2,           VP9Profile2 ),
++    MAP(VP9,         VP9_3,           VP9Profile3 ),
  #endif
  #undef MAP
  };

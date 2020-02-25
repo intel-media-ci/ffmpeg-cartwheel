@@ -1,7 +1,7 @@
-From c7bea748ec5d3d392ffb7b78453dd5aa7a377a77 Mon Sep 17 00:00:00 2001
+From 98ee5d1e6d3ea0cd432d453901d11b081bbda717 Mon Sep 17 00:00:00 2001
 From: Linjie Fu <linjie.fu@intel.com>
 Date: Thu, 28 Nov 2019 14:46:17 +0800
-Subject: [PATCH 07/35] lavc/qsvenc: Add support for 4:4:4 8/10 bit HEVC REXT
+Subject: [PATCH 06/28] lavc/qsvenc: Add support for 4:4:4 8/10 bit HEVC REXT
  encoding
 
 Enables HEVC Range Extension encoding support for 4:4:4 8/10 bit
@@ -26,7 +26,7 @@ Signed-off-by: Linjie Fu <linjie.fu@intel.com>
  2 files changed, 4 insertions(+), 1 deletion(-)
 
 diff --git a/libavcodec/qsvenc.c b/libavcodec/qsvenc.c
-index 5960eef..6ae3fbc 100644
+index f285aa3..a64d0c7 100644
 --- a/libavcodec/qsvenc.c
 +++ b/libavcodec/qsvenc.c
 @@ -66,6 +66,7 @@ static const struct {
@@ -37,7 +37,7 @@ index 5960eef..6ae3fbc 100644
  #endif
  };
  
-@@ -538,7 +539,8 @@ static int init_video_param(AVCodecContext *avctx, QSVEncContext *q)
+@@ -544,7 +545,8 @@ static int init_video_param(AVCodecContext *avctx, QSVEncContext *q)
      q->param.mfx.FrameInfo.CropH          = avctx->height;
      q->param.mfx.FrameInfo.AspectRatioW   = avctx->sample_aspect_ratio.num;
      q->param.mfx.FrameInfo.AspectRatioH   = avctx->sample_aspect_ratio.den;

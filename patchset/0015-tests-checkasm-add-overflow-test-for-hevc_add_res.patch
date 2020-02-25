@@ -1,7 +1,7 @@
-From 5203649a581f5f57d5f212f153294605ba0ba782 Mon Sep 17 00:00:00 2001
+From 6ee230c2af56246fbd670e3384b0b9ce7668f5fe Mon Sep 17 00:00:00 2001
 From: Linjie Fu <linjie.fu@intel.com>
 Date: Tue, 10 Dec 2019 13:59:54 +0800
-Subject: [PATCH 22/35] tests/checkasm: add overflow test for hevc_add_res
+Subject: [PATCH 15/28] tests/checkasm: add overflow test for hevc_add_res
 
 Add overflow test for hevc_add_res when int16_t coeff = -32768.
 The result of C is good, while ASM is not.

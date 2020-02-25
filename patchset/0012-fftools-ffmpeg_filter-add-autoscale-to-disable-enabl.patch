@@ -1,7 +1,7 @@
-From 6ec4fa2095a5782d2766b3904d8e602e72a87122 Mon Sep 17 00:00:00 2001
+From 5593a260175409aa946e3a13abe20ef3a1232306 Mon Sep 17 00:00:00 2001
 From: Linjie Fu <linjie.fu@intel.com>
 Date: Mon, 29 Jul 2019 20:56:34 +0800
-Subject: [PATCH 19/35] fftools/ffmpeg_filter: add -autoscale to disable/enable
+Subject: [PATCH 12/28] fftools/ffmpeg_filter: add -autoscale to disable/enable
  the default scale
 
 Currently, ffmpeg inserts scale filter by default in the filter graph
@@ -27,7 +27,7 @@ Signed-off-by: Linjie Fu <linjie.fu@intel.com>
  5 files changed, 26 insertions(+), 5 deletions(-)
 
 diff --git a/doc/ffmpeg.texi b/doc/ffmpeg.texi
-index dd461c0..716dd2c 100644
+index 29753f0..aebafb3 100644
 --- a/doc/ffmpeg.texi
 +++ b/doc/ffmpeg.texi
 @@ -734,10 +734,6 @@ ffmpeg -dump_attachment:t "" -i INPUT
@@ -61,7 +61,7 @@ index dd461c0..716dd2c 100644
  
  @section Advanced Video options
 diff --git a/fftools/ffmpeg.c b/fftools/ffmpeg.c
-index 6bcd7b9..864c1fb 100644
+index e5fbd47..def19c1 100644
 --- a/fftools/ffmpeg.c
 +++ b/fftools/ffmpeg.c
 @@ -2125,6 +2125,7 @@ static int ifilter_send_frame(InputFilter *ifilter, AVFrame *frame)
@@ -115,7 +115,7 @@ index 40cc4c1..dafcab7 100644
          AVFilterContext *filter;
          AVDictionaryEntry *e = NULL;
 diff --git a/fftools/ffmpeg_opt.c b/fftools/ffmpeg_opt.c
-index 1510e02..37083f2 100644
+index 12d4488..46d8c88 100644
 --- a/fftools/ffmpeg_opt.c
 +++ b/fftools/ffmpeg_opt.c
 @@ -743,7 +743,9 @@ static void add_input_streams(OptionsContext *o, AVFormatContext *ic)

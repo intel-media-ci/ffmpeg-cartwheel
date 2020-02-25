@@ -1,7 +1,7 @@
-From 5e7bf1db1f7c3aa0a968fbc735db297a44943c8d Mon Sep 17 00:00:00 2001
+From 8f937b30de2b663ad469bc5743d04b616cffed3e Mon Sep 17 00:00:00 2001
 From: Linjie Fu <linjie.fu@intel.com>
 Date: Tue, 10 Dec 2019 15:59:19 +0800
-Subject: [PATCH 25/35] lavc/x86/hevc_add_res: Fix coeff overflow in
+Subject: [PATCH 18/28] lavc/x86/hevc_add_res: Fix coeff overflow in
  ADD_RES_SSE_16_32_8
 
 Fix overflow for coeff -32768 in function ADD_RES_SSE_16_32_8 with no
