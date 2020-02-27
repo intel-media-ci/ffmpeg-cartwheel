@@ -8,6 +8,12 @@ FFmpeg Unmerged Patches
 ** How to submit pull request
 
     Please submit pull request for this folder.
-    
-    
+
+** How to apply patches
+
+    $ git am patchset/*.patch
+    or
+    $ for i in patchset/*.patch; do patch -p1 < $i; done
+
+
 Please contact zachary.zhou@intel.com if you have any questions.
