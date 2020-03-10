@@ -15,5 +15,7 @@ FFmpeg Unmerged Patches
     or
     $ for i in patchset/*.patch; do patch -p1 < $i; done
 
+    Note: CI server use 'patch -t' to apply patches
+
 
 Please contact zachary.zhou@intel.com if you have any questions.
