@@ -1,0 +1,30 @@
+From d68db4ae76f5550668635a59ea16bf94d58d6e1d Mon Sep 17 00:00:00 2001
+From: Xu Guangxin <guangxin.xu@intel.com>
+Date: Fri, 13 Mar 2020 09:14:48 -0400
+Subject: [PATCH] lavc: hevc, fix dbp clear logical
+
+If first frame is IDR frame with poc 0, and second frame is a IDR frame with poc 0,
+and the no_output_of_prior_pics_flag is true.
+We we add second IDR to dpb, the right thing is drop first IDR.
+But from current code, since the second IDR has same poc as first. It will not drop
+first IDR.
+---
+ libavcodec/hevc_refs.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/libavcodec/hevc_refs.c b/libavcodec/hevc_refs.c
+index 7870a72fd6..8e46b33ea0 100644
+--- a/libavcodec/hevc_refs.c
++++ b/libavcodec/hevc_refs.c
+@@ -181,7 +181,7 @@ int ff_hevc_output_frame(HEVCContext *s, AVFrame *out, int flush)
+         if (s->sh.no_output_of_prior_pics_flag == 1 && s->no_rasl_output_flag == 1) {
+             for (i = 0; i < FF_ARRAY_ELEMS(s->DPB); i++) {
+                 HEVCFrame *frame = &s->DPB[i];
+-                if (!(frame->flags & HEVC_FRAME_FLAG_BUMPING) && frame->poc != s->poc &&
++                if (!(frame->flags & HEVC_FRAME_FLAG_BUMPING) && frame != s->ref &&
+                         frame->sequence == s->seq_output) {
+                     ff_hevc_unref_frame(s, frame, HEVC_FRAME_FLAG_OUTPUT);
+                 }
+-- 
+2.20.1
+
