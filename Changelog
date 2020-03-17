@@ -48,6 +48,12 @@ version <next>:
 - AMQP 0-9-1 protocol (RabbitMQ)
 - Vulkan support
 - avgblur_vulkan, overlay_vulkan, scale_vulkan and chromaber_vulkan filters
+- ADPCM IMA MTF decoder
+- FWSE demuxer
+- DERF DPCM decoder
+- DERF demuxer
+- CRI HCA decoder
+- CRI HCA demuxer
 
 
 version 4.2:

@@ -553,6 +553,7 @@ enum AVCodecID {
     AV_CODEC_ID_ADPCM_ZORK,
     AV_CODEC_ID_ADPCM_IMA_APM,
     AV_CODEC_ID_ADPCM_IMA_ALP,
+    AV_CODEC_ID_ADPCM_IMA_MTF,
 
     /* AMR */
     AV_CODEC_ID_AMR_NB = 0x12000,
@@ -570,6 +571,7 @@ enum AVCodecID {
 
     AV_CODEC_ID_SDX2_DPCM = 0x14800,
     AV_CODEC_ID_GREMLIN_DPCM,
+    AV_CODEC_ID_DERF_DPCM,
 
     /* audio codecs */
     AV_CODEC_ID_MP2 = 0x15000,
@@ -666,6 +668,7 @@ enum AVCodecID {
     AV_CODEC_ID_ACELP_KELVIN,
     AV_CODEC_ID_MPEGH_3D_AUDIO,
     AV_CODEC_ID_SIREN,
+    AV_CODEC_ID_HCA,
 
     /* subtitle codecs */
     AV_CODEC_ID_FIRST_SUBTITLE = 0x17000,          ///< A dummy ID pointing at the start of subtitle codecs.
