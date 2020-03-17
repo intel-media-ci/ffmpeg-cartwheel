@@ -1,0 +1,49 @@
+From f94d3acca4a2b0dabe7a879cdbbd1c66a99fb601 Mon Sep 17 00:00:00 2001
+From: Xu Guangxin <guangxin.xu@intel.com>
+Date: Mon, 16 Mar 2020 06:15:49 -0400
+Subject: [PATCH 33/37] lavc: hevc_ps, add poc_msb_present to LongTermRPS
+
+we need them in find_ref_idx, see 8.3.2 for details
+---
+ libavcodec/hevc_ps.h | 1 +
+ libavcodec/hevcdec.c | 5 ++---
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/libavcodec/hevc_ps.h b/libavcodec/hevc_ps.h
+index 8e1bccdaaf..238edd3ddc 100644
+--- a/libavcodec/hevc_ps.h
++++ b/libavcodec/hevc_ps.h
+@@ -41,6 +41,7 @@ typedef struct ShortTermRPS {
+ 
+ typedef struct LongTermRPS {
+     int     poc[32];
++    uint8_t poc_msb_present[32];
+     uint8_t used[32];
+     uint8_t nb_refs;
+ } LongTermRPS;
+diff --git a/libavcodec/hevcdec.c b/libavcodec/hevcdec.c
+index a89e998347..60d44b5b8f 100644
+--- a/libavcodec/hevcdec.c
++++ b/libavcodec/hevcdec.c
+@@ -280,7 +280,6 @@ static int decode_lt_rps(HEVCContext *s, LongTermRPS *rps, GetBitContext *gb)
+     rps->nb_refs = nb_sh + nb_sps;
+ 
+     for (i = 0; i < rps->nb_refs; i++) {
+-        uint8_t delta_poc_msb_present;
+ 
+         if (i < nb_sps) {
+             uint8_t lt_idx_sps = 0;
+@@ -295,8 +294,8 @@ static int decode_lt_rps(HEVCContext *s, LongTermRPS *rps, GetBitContext *gb)
+             rps->used[i] = get_bits1(gb);
+         }
+ 
+-        delta_poc_msb_present = get_bits1(gb);
+-        if (delta_poc_msb_present) {
++        rps->poc_msb_present[i] = get_bits1(gb);
++        if (rps->poc_msb_present[i]) {
+             int64_t delta = get_ue_golomb_long(gb);
+             int64_t poc;
+ 
+-- 
+2.20.1
+
