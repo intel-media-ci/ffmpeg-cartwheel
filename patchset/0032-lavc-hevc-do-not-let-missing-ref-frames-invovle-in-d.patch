@@ -4,7 +4,7 @@ Date: Mon, 16 Mar 2020 03:51:40 -0400
 Subject: [PATCH 32/37] lavc: hevc, do not let missing ref frames invovle in
  dpb process
 
-We will generate frames for missed reference. the frame just used for refrence.
+We will generate a new frame for a missed reference. The frame can only be used for reference.
 We assign an invalid decode sequence to it, so it will not involve any dpb process
 ---
  libavcodec/hevc_refs.c | 13 ++++++++++++-
