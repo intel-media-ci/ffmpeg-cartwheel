@@ -1,0 +1,27 @@
+From 689974d217b1efdeff0fcb6ca1c094f65813c3bf Mon Sep 17 00:00:00 2001
+From: Linjie Fu <linjie.fu@intel.com>
+Date: Thu, 19 Mar 2020 21:44:41 +0800
+Subject: [PATCH 38/38] lavc/vaapi_hevc: add missing max_8bit_constraint_flag
+
+This is somehow missed in the upstreamed patch.
+
+Signed-off-by: Linjie Fu <linjie.fu@intel.com>
+---
+ libavcodec/vaapi_hevc.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/libavcodec/vaapi_hevc.c b/libavcodec/vaapi_hevc.c
+index e1c4f26..6135eb2 100644
+--- a/libavcodec/vaapi_hevc.c
++++ b/libavcodec/vaapi_hevc.c
+@@ -521,6 +521,7 @@ static int ptl_convert(const PTLCommon *general_ptl, H265RawProfileTierLevel *h2
+     copy_field(frame_only_constraint_flag);
+     copy_field(max_12bit_constraint_flag);
+     copy_field(max_10bit_constraint_flag);
++    copy_field(max_8bit_constraint_flag);
+     copy_field(max_422chroma_constraint_flag);
+     copy_field(max_420chroma_constraint_flag);
+     copy_field(max_monochrome_constraint_flag);
+-- 
+2.7.4
+
