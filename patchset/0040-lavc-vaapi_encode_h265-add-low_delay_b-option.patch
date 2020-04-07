@@ -1,0 +1,47 @@
+From aad2a5477be82296656c6cb46c80c29bf0e866ff Mon Sep 17 00:00:00 2001
+From: Linjie Fu <linjie.fu@intel.com>
+Date: Tue, 7 Apr 2020 14:03:21 +0800
+Subject: [PATCH 1/2] lavc/vaapi_encode_h265: add low_delay_b option
+
+Set to 1 by default for low power.
+
+Signed-off-by: Linjie Fu <linjie.fu@intel.com>
+---
+ libavcodec/vaapi_encode_h265.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/libavcodec/vaapi_encode_h265.c b/libavcodec/vaapi_encode_h265.c
+index 7d5aa34..f61ca02 100644
+--- a/libavcodec/vaapi_encode_h265.c
++++ b/libavcodec/vaapi_encode_h265.c
+@@ -62,6 +62,7 @@ typedef struct VAAPIEncodeH265Context {
+     int tier;
+     int level;
+     int sei;
++    int low_delay_b;
+ 
+     // Derived settings.
+     int fixed_qp_idr;
+@@ -1070,7 +1071,8 @@ static int vaapi_encode_h265_init_slice_params(AVCodecContext *avctx,
+ 
+     // Driver requires low delay B frame and matched ref_pic_list0/1[]
+     // for low power mode
+-    if (pic->type == PICTURE_TYPE_P && ctx->low_power) {
++    priv->low_delay_b = ctx->low_power ? 1 : priv->low_delay_b;
++    if (pic->type == PICTURE_TYPE_P && priv->low_delay_b) {
+         vslice->slice_type = HEVC_SLICE_B;
+         for (i = 0; i < FF_ARRAY_ELEMS(vslice->ref_pic_list0); i++) {
+             vslice->ref_pic_list1[i].picture_id = vslice->ref_pic_list0[i].picture_id;
+@@ -1279,6 +1281,9 @@ static const AVOption vaapi_encode_h265_options[] = {
+       { .i64 = SEI_MASTERING_DISPLAY | SEI_CONTENT_LIGHT_LEVEL },
+       INT_MIN, INT_MAX, FLAGS, "sei" },
+ 
++    { "low_delay_b", "Use low delay B frame instead of P frame",
++      OFFSET(low_delay_b), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 1, FLAGS },
++
+     { NULL },
+ };
+ 
+-- 
+2.7.4
+
