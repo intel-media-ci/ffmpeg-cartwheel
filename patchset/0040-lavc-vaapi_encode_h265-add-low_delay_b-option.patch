@@ -1,17 +1,19 @@
-From aad2a5477be82296656c6cb46c80c29bf0e866ff Mon Sep 17 00:00:00 2001
+From 0a8f399ec5a8bffb8c2cc98e5e77d3401cf35a92 Mon Sep 17 00:00:00 2001
 From: Linjie Fu <linjie.fu@intel.com>
 Date: Tue, 7 Apr 2020 14:03:21 +0800
 Subject: [PATCH 1/2] lavc/vaapi_encode_h265: add low_delay_b option
 
 Set to 1 by default for low power.
 
+Set slice type as well.
+
 Signed-off-by: Linjie Fu <linjie.fu@intel.com>
 ---
- libavcodec/vaapi_encode_h265.c | 7 ++++++-
- 1 file changed, 6 insertions(+), 1 deletion(-)
+ libavcodec/vaapi_encode_h265.c | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
 
 diff --git a/libavcodec/vaapi_encode_h265.c b/libavcodec/vaapi_encode_h265.c
-index 7d5aa34..f61ca02 100644
+index 7d5aa34..058bf8d 100644
 --- a/libavcodec/vaapi_encode_h265.c
 +++ b/libavcodec/vaapi_encode_h265.c
 @@ -62,6 +62,7 @@ typedef struct VAAPIEncodeH265Context {
@@ -22,12 +24,22 @@ index 7d5aa34..f61ca02 100644
  
      // Derived settings.
      int fixed_qp_idr;
-@@ -1070,7 +1071,8 @@ static int vaapi_encode_h265_init_slice_params(AVCodecContext *avctx,
+@@ -899,8 +900,9 @@ static int vaapi_encode_h265_init_slice_params(AVCodecContext *avctx,
+     sh->slice_segment_address           = slice->block_start;
+ 
+     sh->slice_type = hpic->slice_type;
++    priv->low_delay_b = ctx->low_power ? 1 : priv->low_delay_b;
+     // driver requires low delay B frame in low power mode
+-    if (sh->slice_type == HEVC_SLICE_P && ctx->low_power)
++    if (sh->slice_type == HEVC_SLICE_P && priv->low_delay_b)
+         sh->slice_type = HEVC_SLICE_B;
+ 
+     sh->slice_pic_order_cnt_lsb = hpic->pic_order_cnt &
+@@ -1070,7 +1072,7 @@ static int vaapi_encode_h265_init_slice_params(AVCodecContext *avctx,
  
      // Driver requires low delay B frame and matched ref_pic_list0/1[]
      // for low power mode
 -    if (pic->type == PICTURE_TYPE_P && ctx->low_power) {
-+    priv->low_delay_b = ctx->low_power ? 1 : priv->low_delay_b;
 +    if (pic->type == PICTURE_TYPE_P && priv->low_delay_b) {
          vslice->slice_type = HEVC_SLICE_B;
          for (i = 0; i < FF_ARRAY_ELEMS(vslice->ref_pic_list0); i++) {
