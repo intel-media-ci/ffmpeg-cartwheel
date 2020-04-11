@@ -1336,6 +1336,7 @@ static int update_frag_index(MOVContext *c, int64_t offset)
         frag_stream_info[i].id = c->fc->streams[i]->id;
         frag_stream_info[i].sidx_pts = AV_NOPTS_VALUE;
         frag_stream_info[i].tfdt_dts = AV_NOPTS_VALUE;
+        frag_stream_info[i].next_trun_dts = AV_NOPTS_VALUE;
         frag_stream_info[i].first_tfra_pts = AV_NOPTS_VALUE;
         frag_stream_info[i].index_entry = -1;
         frag_stream_info[i].encryption_index = NULL;
@@ -4614,6 +4615,7 @@ static int mov_read_tfhd(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     MOVFragment *frag = &c->fragment;
     MOVTrackExt *trex = NULL;
     int flags, track_id, i;
+    MOVFragmentStreamInfo * frag_stream_info;
 
     avio_r8(pb); /* version */
     flags = avio_rb24(pb);
@@ -4646,6 +4648,10 @@ static int mov_read_tfhd(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     frag->flags    = flags & MOV_TFHD_DEFAULT_FLAGS ?
                      avio_rb32(pb) : trex->flags;
     av_log(c->fc, AV_LOG_TRACE, "frag flags 0x%x\n", frag->flags);
+
+    frag_stream_info = get_current_frag_stream_info(&c->frag_index);
+    if (frag_stream_info)
+        frag_stream_info->next_trun_dts = AV_NOPTS_VALUE;
 
     return 0;
 }
@@ -4800,11 +4806,18 @@ static int mov_read_trun(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     frag_stream_info = get_current_frag_stream_info(&c->frag_index);
     if (frag_stream_info)
     {
-        if (frag_stream_info->first_tfra_pts != AV_NOPTS_VALUE &&
+        if (frag_stream_info->next_trun_dts != AV_NOPTS_VALUE) {
+            dts = frag_stream_info->next_trun_dts - sc->time_offset;
+        } else if (frag_stream_info->first_tfra_pts != AV_NOPTS_VALUE &&
             c->use_mfra_for == FF_MOV_FLAG_MFRA_PTS) {
             pts = frag_stream_info->first_tfra_pts;
             av_log(c->fc, AV_LOG_DEBUG, "found mfra time %"PRId64
                     ", using it for pts\n", pts);
+        } else if (frag_stream_info->first_tfra_pts != AV_NOPTS_VALUE &&
+            c->use_mfra_for == FF_MOV_FLAG_MFRA_DTS) {
+            dts = frag_stream_info->first_tfra_pts;
+            av_log(c->fc, AV_LOG_DEBUG, "found mfra time %"PRId64
+                    ", using it for dts\n", pts);
         } else if (frag_stream_info->sidx_pts != AV_NOPTS_VALUE) {
             // FIXME: sidx earliest_presentation_time is *PTS*, s.b.
             // pts = frag_stream_info->sidx_pts;
@@ -4955,6 +4968,8 @@ static int mov_read_trun(MOVContext *c, AVIOContext *pb, MOVAtom atom)
             sc->nb_frames_for_fps ++;
         }
     }
+    if (frag_stream_info)
+        frag_stream_info->next_trun_dts = dts + sc->time_offset;
     if (i < entries) {
         // EOF found before reading all entries.  Fix the hole this would
         // leave in index_entries and ctts_data
@@ -7729,7 +7744,8 @@ static int mov_switch_root(AVFormatContext *s, int64_t target, int index)
     mov->next_root_atom = 0;
     if (index < 0 || index >= mov->frag_index.nb_items)
         index = search_frag_moof_offset(&mov->frag_index, target);
-    if (index < mov->frag_index.nb_items) {
+    if (index < mov->frag_index.nb_items &&
+        mov->frag_index.item[index].moof_offset == target) {
         if (index + 1 < mov->frag_index.nb_items)
             mov->next_root_atom = mov->frag_index.item[index + 1].moof_offset;
         if (mov->frag_index.item[index].headers_read)
