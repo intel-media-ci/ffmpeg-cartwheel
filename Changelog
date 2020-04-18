@@ -59,6 +59,8 @@ version <next>:
 - mv30 decoder
 - Expanded styling support for 3GPP Timed Text Subtitles (movtext)
 - WebP parser
+- tmedian filter
+- maskedthreshold filter
 
 
 version 4.2:
