@@ -668,7 +668,7 @@ static inline int16_t adpcm_argo_expand_nibble(ADPCMChannelStatus *cs, int nibbl
 }
 
 /**
- * Get the number of samples that will be decoded from the packet.
+ * Get the number of samples (per channel) that will be decoded from the packet.
  * In one case, this is actually the maximum number of samples possible to
  * decode with the given buf_size.
  *
@@ -1271,14 +1271,14 @@ static int adpcm_decode_frame(AVCodecContext *avctx, void *data,
         }
         break;
     case AV_CODEC_ID_ADPCM_IMA_APC:
-        while (bytestream2_get_bytes_left(&gb) > 0) {
+        for (n = nb_samples >> (1 - st); n > 0; n--) {
             int v = bytestream2_get_byteu(&gb);
             *samples++ = adpcm_ima_expand_nibble(&c->status[0],  v >> 4  , 3);
             *samples++ = adpcm_ima_expand_nibble(&c->status[st], v & 0x0F, 3);
         }
         break;
     case AV_CODEC_ID_ADPCM_IMA_SSI:
-        while (bytestream2_get_bytes_left(&gb) > 0) {
+        for (n = nb_samples >> (1 - st); n > 0; n--) {
             int v = bytestream2_get_byteu(&gb);
             *samples++ = adpcm_ima_qt_expand_nibble(&c->status[0],  v >> 4  );
             *samples++ = adpcm_ima_qt_expand_nibble(&c->status[st], v & 0x0F);
@@ -1305,7 +1305,7 @@ static int adpcm_decode_frame(AVCodecContext *avctx, void *data,
         }
         break;
     case AV_CODEC_ID_ADPCM_IMA_OKI:
-        while (bytestream2_get_bytes_left(&gb) > 0) {
+        for (n = nb_samples >> (1 - st); n > 0; n--) {
             int v = bytestream2_get_byteu(&gb);
             *samples++ = adpcm_ima_oki_expand_nibble(&c->status[0],  v >> 4  );
             *samples++ = adpcm_ima_oki_expand_nibble(&c->status[st], v & 0x0F);

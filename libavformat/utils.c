@@ -222,7 +222,8 @@ static const AVCodec *find_probe_decoder(AVFormatContext *s, const AVStream *st,
 
     if (codec->capabilities & AV_CODEC_CAP_AVOID_PROBING) {
         const AVCodec *probe_codec = NULL;
-        while (probe_codec = av_codec_next(probe_codec)) {
+        void *iter = NULL;
+        while ((probe_codec = av_codec_iterate(&iter))) {
             if (probe_codec->id == codec_id &&
                     av_codec_is_decoder(probe_codec) &&
                     !(probe_codec->capabilities & (AV_CODEC_CAP_AVOID_PROBING | AV_CODEC_CAP_EXPERIMENTAL))) {
@@ -3125,6 +3126,8 @@ static int try_decode_frame(AVFormatContext *s, AVStream *st,
         } else if (avctx->codec_type == AVMEDIA_TYPE_SUBTITLE) {
             ret = avcodec_decode_subtitle2(avctx, &subtitle,
                                            &got_picture, &pkt);
+            if (got_picture)
+                avsubtitle_free(&subtitle);
             if (ret >= 0)
                 pkt.size = 0;
         }
