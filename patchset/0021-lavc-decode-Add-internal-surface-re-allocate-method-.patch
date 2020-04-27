@@ -10,7 +10,7 @@ re-allocate surface internally through ff_decode_get_hw_frames_ctx.
 Signed-off-by: Linjie Fu <linjie.fu@intel.com>
 ---
  libavcodec/decode.c  | 36 ++++++++++++++++++++++++++++++++++++
- libavcodec/hwaccel.h |  1 +
+ libavcodec/hwconfig.h |  1 +
  2 files changed, 37 insertions(+)
 
 diff --git a/libavcodec/decode.c b/libavcodec/decode.c
@@ -67,10 +67,10 @@ index 3e74759..561d025 100644
          // Remove the previous hwaccel, if there was one.
          hwaccel_uninit(avctx);
  
-diff --git a/libavcodec/hwaccel.h b/libavcodec/hwaccel.h
+diff --git a/libavcodec/hwconfig.h b/libavcodec/hwconfig.h
 index 3aaa925..1605ad4 100644
---- a/libavcodec/hwaccel.h
-+++ b/libavcodec/hwaccel.h
+--- a/libavcodec/hwconfig.h
++++ b/libavcodec/hwconfig.h
 @@ -24,6 +24,7 @@
  
  
