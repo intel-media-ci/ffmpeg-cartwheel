@@ -37,6 +37,8 @@
 #define SM_SIZELIMITED_SLICE SM_DYN_SLICE
 #endif
 
+#define TARGET_BITRATE_DEFAULT 2*1000*1000
+
 typedef struct SVCContext {
     const AVClass *av_class;
     ISVCEncoder *encoder;
@@ -47,15 +49,20 @@ typedef struct SVCContext {
     int skip_frames;
     int skipped;
     int cabac;
+
+    // rate control mode
+    int rc_mode;
 } SVCContext;
 
 #define OFFSET(x) offsetof(SVCContext, x)
 #define VE AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM
+#define DEPRECATED AV_OPT_FLAG_DEPRECATED
 static const AVOption options[] = {
+#if FF_API_OPENH264_SLICE_MODE
 #if OPENH264_VER_AT_LEAST(1, 6)
-    { "slice_mode", "set slice mode", OFFSET(slice_mode), AV_OPT_TYPE_INT, { .i64 = SM_FIXEDSLCNUM_SLICE }, SM_SINGLE_SLICE, SM_RESERVED, VE, "slice_mode" },
+    { "slice_mode", "set slice mode, use slices/max_nal_size", OFFSET(slice_mode), AV_OPT_TYPE_INT, { .i64 = SM_FIXEDSLCNUM_SLICE }, SM_SINGLE_SLICE, SM_RESERVED, VE|DEPRECATED, "slice_mode" },
 #else
-    { "slice_mode", "set slice mode", OFFSET(slice_mode), AV_OPT_TYPE_INT, { .i64 = SM_AUTO_SLICE }, SM_SINGLE_SLICE, SM_RESERVED, VE, "slice_mode" },
+    { "slice_mode", "set slice mode, use slices/max_nal_size", OFFSET(slice_mode), AV_OPT_TYPE_INT, { .i64 = SM_AUTO_SLICE }, SM_SINGLE_SLICE, SM_RESERVED, VE|DEPRECATED, "slice_mode" },
 #endif
         { "fixed", "a fixed number of slices", 0, AV_OPT_TYPE_CONST, { .i64 = SM_FIXEDSLCNUM_SLICE }, 0, 0, VE, "slice_mode" },
 #if OPENH264_VER_AT_LEAST(1, 6)
@@ -66,11 +73,22 @@ static const AVOption options[] = {
         { "auto", "automatic number of slices according to number of threads", 0, AV_OPT_TYPE_CONST, { .i64 = SM_AUTO_SLICE }, 0, 0, VE, "slice_mode" },
         { "dyn", "Dynamic slicing", 0, AV_OPT_TYPE_CONST, { .i64 = SM_DYN_SLICE }, 0, 0, VE, "slice_mode" },
 #endif
+#endif
     { "loopfilter", "enable loop filter", OFFSET(loopfilter), AV_OPT_TYPE_INT, { .i64 = 1 }, 0, 1, VE },
     { "profile", "set profile restrictions", OFFSET(profile), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, VE },
     { "max_nal_size", "set maximum NAL size in bytes", OFFSET(max_nal_size), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, INT_MAX, VE },
     { "allow_skip_frames", "allow skipping frames to hit the target bitrate", OFFSET(skip_frames), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VE },
     { "cabac", "Enable cabac", OFFSET(cabac), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 1, VE },
+
+    { "rc_mode", "Select rate control mode", OFFSET(rc_mode), AV_OPT_TYPE_INT, { .i64 = RC_QUALITY_MODE }, RC_OFF_MODE, RC_TIMESTAMP_MODE, VE, "rc_mode" },
+        { "off",       "bit rate control off",                                                 0, AV_OPT_TYPE_CONST, { .i64 = RC_OFF_MODE },         0, 0, VE, "rc_mode" },
+        { "quality",   "quality mode",                                                         0, AV_OPT_TYPE_CONST, { .i64 = RC_QUALITY_MODE },     0, 0, VE, "rc_mode" },
+        { "bitrate",   "bitrate mode",                                                         0, AV_OPT_TYPE_CONST, { .i64 = RC_BITRATE_MODE },     0, 0, VE, "rc_mode" },
+        { "buffer",    "using buffer status to adjust the video quality (no bitrate control)", 0, AV_OPT_TYPE_CONST, { .i64 = RC_BUFFERBASED_MODE }, 0, 0, VE, "rc_mode" },
+#if OPENH264_VER_AT_LEAST(1, 4)
+        { "timestamp", "bit rate control based on timestamp",                                  0, AV_OPT_TYPE_CONST, { .i64 = RC_TIMESTAMP_MODE },   0, 0, VE, "rc_mode" },
+#endif
+
     { NULL }
 };
 
@@ -132,9 +150,13 @@ FF_ENABLE_DEPRECATION_WARNINGS
     param.fMaxFrameRate              = 1/av_q2d(avctx->time_base);
     param.iPicWidth                  = avctx->width;
     param.iPicHeight                 = avctx->height;
-    param.iTargetBitrate             = avctx->bit_rate;
+    param.iTargetBitrate             = avctx->bit_rate > 0 ? avctx->bit_rate : TARGET_BITRATE_DEFAULT;
     param.iMaxBitrate                = FFMAX(avctx->rc_max_rate, avctx->bit_rate);
-    param.iRCMode                    = RC_QUALITY_MODE;
+    param.iRCMode                    = s->rc_mode;
+    if (avctx->qmax >= 0)
+        param.iMaxQp                 = av_clip(avctx->qmax, 1, 51);
+    if (avctx->qmin >= 0)
+        param.iMinQp                 = av_clip(avctx->qmin, 1, param.iMaxQp);
     param.iTemporalLayerNum          = 1;
     param.iSpatialLayerNum           = 1;
     param.bEnableDenoise             = 0;
@@ -143,7 +165,8 @@ FF_ENABLE_DEPRECATION_WARNINGS
     param.bEnableFrameSkip           = s->skip_frames;
     param.bEnableLongTermReference   = 0;
     param.iLtrMarkPeriod             = 30;
-    param.uiIntraPeriod              = avctx->gop_size;
+    if (avctx->gop_size >= 0)
+        param.uiIntraPeriod          = avctx->gop_size;
 #if OPENH264_VER_AT_LEAST(1, 4)
     param.eSpsPpsIdStrategy          = CONSTANT_ID;
 #else
@@ -224,6 +247,8 @@ FF_ENABLE_DEPRECATION_WARNINGS
     param.sSpatialLayers[0].sSliceCfg.uiSliceMode               = s->slice_mode;
     param.sSpatialLayers[0].sSliceCfg.sSliceArgument.uiSliceNum = avctx->slices;
 #endif
+    if (avctx->slices == 0 && s->slice_mode == SM_FIXEDSLCNUM_SLICE)
+        av_log(avctx, AV_LOG_WARNING, "Slice count will be set automatically\n");
 
     if (s->slice_mode == SM_SIZELIMITED_SLICE) {
         if (s->max_nal_size) {
@@ -331,6 +356,14 @@ static int svc_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
     return 0;
 }
 
+static const AVCodecDefault svc_enc_defaults[] = {
+    { "b",         "0"     },
+    { "g",         "-1"    },
+    { "qmin",      "-1"    },
+    { "qmax",      "-1"    },
+    { NULL },
+};
+
 AVCodec ff_libopenh264_encoder = {
     .name           = "libopenh264",
     .long_name      = NULL_IF_CONFIG_SMALL("OpenH264 H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10"),
@@ -344,6 +377,7 @@ AVCodec ff_libopenh264_encoder = {
     .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
     .pix_fmts       = (const enum AVPixelFormat[]){ AV_PIX_FMT_YUV420P,
                                                     AV_PIX_FMT_NONE },
+    .defaults       = svc_enc_defaults,
     .priv_class     = &class,
     .wrapper_name   = "libopenh264",
 };

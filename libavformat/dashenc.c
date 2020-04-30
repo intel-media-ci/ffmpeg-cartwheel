@@ -1731,7 +1731,7 @@ static int add_segment(OutputStream *os, const char *file,
     Segment *seg;
     if (os->nb_segments >= os->segments_size) {
         os->segments_size = (os->segments_size + 1) * 2;
-        if ((err = av_reallocp(&os->segments, sizeof(*os->segments) *
+        if ((err = av_reallocp_array(&os->segments, sizeof(*os->segments),
                                os->segments_size)) < 0) {
             os->segments_size = 0;
             os->nb_segments = 0;
@@ -1916,6 +1916,7 @@ static int dash_flush(AVFormatContext *s, int final, int stream)
         OutputStream *os = &c->streams[i];
         AVStream *st = s->streams[i];
         int range_length, index_length = 0;
+        int64_t duration;
 
         if (!os->packets_written)
             continue;
@@ -1955,23 +1956,18 @@ static int dash_flush(AVFormatContext *s, int final, int stream)
             }
         }
 
-        os->last_duration = FFMAX(os->last_duration, av_rescale_q(os->max_pts - os->start_pts,
-                                                                  st->time_base,
-                                                                  AV_TIME_BASE_Q));
+        duration = av_rescale_q(os->max_pts - os->start_pts, st->time_base, AV_TIME_BASE_Q);
+        os->last_duration = FFMAX(os->last_duration, duration);
 
         if (!os->muxer_overhead && os->max_pts > os->start_pts)
             os->muxer_overhead = ((int64_t) (range_length - os->total_pkt_size) *
-                                  8 * AV_TIME_BASE) /
-                                 av_rescale_q(os->max_pts - os->start_pts,
-                                              st->time_base, AV_TIME_BASE_Q);
+                                  8 * AV_TIME_BASE) / duration;
         os->total_pkt_size = 0;
         os->total_pkt_duration = 0;
 
         if (!os->bit_rate) {
             // calculate average bitrate of first segment
-            int64_t bitrate = (int64_t) range_length * 8 * AV_TIME_BASE / av_rescale_q(os->max_pts - os->start_pts,
-                                                                                       st->time_base,
-                                                                                       AV_TIME_BASE_Q);
+            int64_t bitrate = (int64_t) range_length * 8 * AV_TIME_BASE / duration;
             if (bitrate >= 0)
                 os->bit_rate = bitrate;
         }
@@ -2149,21 +2145,21 @@ static int dash_write_packet(AVFormatContext *s, AVPacket *pkt)
         av_compare_ts(elapsed_duration, st->time_base,
                       seg_end_duration, AV_TIME_BASE_Q) >= 0) {
         if (!c->has_video || st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
-        c->last_duration = av_rescale_q(pkt->pts - os->start_pts,
-                                        st->time_base,
-                                        AV_TIME_BASE_Q);
-        c->total_duration = av_rescale_q(pkt->pts - os->first_pts,
-                                         st->time_base,
-                                         AV_TIME_BASE_Q);
+            c->last_duration = av_rescale_q(pkt->pts - os->start_pts,
+                    st->time_base,
+                    AV_TIME_BASE_Q);
+            c->total_duration = av_rescale_q(pkt->pts - os->first_pts,
+                    st->time_base,
+                    AV_TIME_BASE_Q);
 
-        if ((!c->use_timeline || !c->use_template) && os->last_duration) {
-            if (c->last_duration < os->last_duration*9/10 ||
-                c->last_duration > os->last_duration*11/10) {
-                av_log(s, AV_LOG_WARNING,
-                       "Segment durations differ too much, enable use_timeline "
-                       "and use_template, or keep a stricter keyframe interval\n");
+            if ((!c->use_timeline || !c->use_template) && os->last_duration) {
+                if (c->last_duration < os->last_duration*9/10 ||
+                        c->last_duration > os->last_duration*11/10) {
+                    av_log(s, AV_LOG_WARNING,
+                            "Segment durations differ too much, enable use_timeline "
+                            "and use_template, or keep a stricter keyframe interval\n");
+                }
             }
-        }
         }
 
         if (c->write_prft && os->producer_reference_time.wallclock && !os->producer_reference_time_str[0])
