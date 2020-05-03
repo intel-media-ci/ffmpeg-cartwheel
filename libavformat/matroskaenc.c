@@ -624,33 +624,20 @@ static int put_flac_codecpriv(AVFormatContext *s, AVIOContext *pb,
         const char *vendor = (s->flags & AVFMT_FLAG_BITEXACT) ?
                              "Lavf" : LIBAVFORMAT_IDENT;
         AVDictionary *dict = NULL;
-        uint8_t buf[32], *data, *p;
+        uint8_t buf[32];
         int64_t len;
 
         snprintf(buf, sizeof(buf), "0x%"PRIx64, par->channel_layout);
         av_dict_set(&dict, "WAVEFORMATEXTENSIBLE_CHANNEL_MASK", buf, 0);
 
         len = ff_vorbiscomment_length(dict, vendor, NULL, 0);
-        if (len >= (1 << 24) - 4) {
-            av_dict_free(&dict);
-            return AVERROR(EINVAL);
-        }
+        av_assert1(len < (1 << 24) - 4);
 
-        data = av_malloc(len + 4);
-        if (!data) {
-            av_dict_free(&dict);
-            return AVERROR(ENOMEM);
-        }
+        avio_w8(pb, 0x84);
+        avio_wb24(pb, len);
 
-        data[0] = 0x84;
-        AV_WB24(data + 1, len);
+        ff_vorbiscomment_write(pb, dict, vendor, NULL, 0);
 
-        p = data + 4;
-        ff_vorbiscomment_write(&p, &dict, vendor, NULL, 0);
-
-        avio_write(pb, data, len + 4);
-
-        av_freep(&data);
         av_dict_free(&dict);
     }
 
@@ -1450,6 +1437,12 @@ static int mkv_write_chapters(AVFormatContext *s)
     if (!s->nb_chapters || mkv->wrote_chapters)
         return 0;
 
+    for (i = 0; i < s->nb_chapters; i++)
+        if (!s->chapters[i]->id) {
+            mkv->chapter_id_offset = 1;
+            break;
+        }
+
     mkv_add_seekhead_entry(mkv, MATROSKA_ID_CHAPTERS, avio_tell(pb));
 
     ret = start_ebml_master_crc32(&dyn_cp, mkv);
@@ -1470,6 +1463,7 @@ static int mkv_write_chapters(AVFormatContext *s)
             av_log(s, AV_LOG_ERROR,
                    "Invalid chapter start (%"PRId64") or end (%"PRId64").\n",
                    chapterstart, chapterend);
+            ffio_free_dyn_buf(&dyn_cp);
             return AVERROR_INVALIDDATA;
         }
 
@@ -1693,6 +1687,23 @@ static int mkv_write_tags(AVFormatContext *s)
     return 0;
 }
 
+static const char *get_mimetype(const AVStream *st)
+{
+    const AVDictionaryEntry *t;
+
+    if (t = av_dict_get(st->metadata, "mimetype", NULL, 0))
+        return t->value;
+    if (st->codecpar->codec_id != AV_CODEC_ID_NONE) {
+        const AVCodecDescriptor *desc = avcodec_descriptor_get(st->codecpar->codec_id);
+        if (desc && desc->mime_types) {
+            return desc->mime_types[0];
+        } else if (st->codecpar->codec_id == AV_CODEC_ID_TEXT)
+            return "text/plain";
+    }
+
+    return NULL;
+}
+
 static int mkv_write_attachments(AVFormatContext *s)
 {
     MatroskaMuxContext *mkv = s->priv_data;
@@ -1713,7 +1724,7 @@ static int mkv_write_attachments(AVFormatContext *s)
         mkv_track *track = &mkv->tracks[i];
         ebml_master attached_file;
         const AVDictionaryEntry *t;
-        const char *mimetype = NULL;
+        const char *mimetype;
 
         if (st->codecpar->codec_type != AVMEDIA_TYPE_ATTACHMENT)
             continue;
@@ -1727,21 +1738,9 @@ static int mkv_write_attachments(AVFormatContext *s)
             return AVERROR(EINVAL);
         }
         put_ebml_string(dyn_cp, MATROSKA_ID_FILENAME, t->value);
-        if (t = av_dict_get(st->metadata, "mimetype", NULL, 0))
-            mimetype = t->value;
-        else if (st->codecpar->codec_id != AV_CODEC_ID_NONE ) {
-            const AVCodecDescriptor *desc = avcodec_descriptor_get(st->codecpar->codec_id);
-            if (desc && desc->mime_types) {
-                mimetype = desc->mime_types[0];
-            } else if (st->codecpar->codec_id == AV_CODEC_ID_TEXT)
-                mimetype = "text/plain";
-        }
-        if (!mimetype) {
-            av_log(s, AV_LOG_ERROR, "Attachment stream %d has no mimetype tag and "
-                                    "it cannot be deduced from the codec id.\n", i);
-            return AVERROR(EINVAL);
-        }
 
+        mimetype = get_mimetype(st);
+        av_assert0(mimetype);
         put_ebml_string(dyn_cp, MATROSKA_ID_FILEMIMETYPE, mimetype);
         put_ebml_binary(dyn_cp, MATROSKA_ID_FILEDATA, st->codecpar->extradata, st->codecpar->extradata_size);
         put_ebml_uid(dyn_cp, MATROSKA_ID_FILEUID, track->uid);
@@ -1876,12 +1875,6 @@ static int mkv_write_header(AVFormatContext *s)
     if (ret < 0)
         return ret;
 
-    for (i = 0; i < s->nb_chapters; i++)
-        if (!s->chapters[i]->id) {
-            mkv->chapter_id_offset = 1;
-            break;
-        }
-
     ret = mkv_write_chapters(s);
     if (ret < 0)
         return ret;
@@ -1892,11 +1885,12 @@ static int mkv_write_header(AVFormatContext *s)
             return ret;
     }
 
+    /* Must come after mkv_write_chapters() because of chapter_id_offset */
     ret = mkv_write_tags(s);
     if (ret < 0)
         return ret;
 
-    if (!(s->pb->seekable & AVIO_SEEKABLE_NORMAL) && !mkv->is_live) {
+    if (!(s->pb->seekable & AVIO_SEEKABLE_NORMAL) || mkv->is_live) {
         ret = mkv_write_seekhead(pb, mkv, 0, avio_tell(pb));
         if (ret < 0)
             return ret;
@@ -2451,7 +2445,7 @@ static int mkv_write_trailer(AVFormatContext *s)
         }
     }
 
-    if (mkv->cluster_bc) {
+    if (mkv->cluster_pos != -1) {
         end_ebml_master_crc32(pb, &mkv->cluster_bc, mkv,
                               MATROSKA_ID_CLUSTER, 0, 0);
     }
@@ -2683,6 +2677,10 @@ static int mkv_init(struct AVFormatContext *s)
             if (mkv->mode == MODE_WEBM) {
                 av_log(s, AV_LOG_WARNING, "Stream %d will be ignored "
                        "as WebM doesn't support attachments.\n", i);
+            } else if (!get_mimetype(st)) {
+                av_log(s, AV_LOG_ERROR, "Attachment stream %d has no mimetype "
+                       "tag and it cannot be deduced from the codec id.\n", i);
+                return AVERROR(EINVAL);
             }
             mkv->nb_attachments++;
             continue;
