@@ -1,11 +1,11 @@
-From 26c16b0d88d8d7737ea2d9bcb47200e70ef9b575 Mon Sep 17 00:00:00 2001
+From 75b93cd58c35e884e2862c78b4bfe3f07ebe55db Mon Sep 17 00:00:00 2001
 From: Linjie Fu <linjie.fu@intel.com>
-Date: Wed, 6 May 2020 14:21:54 +0800
-Subject: [PATCH] lavc/vaapi_encode: add
- VA_ENC_SLICE_STRUCTURE_EQUAL_MULTI_ROWS
+Date: Mon, 11 May 2020 14:32:42 +0800
+Subject: [PATCH 1/4] lavc/vaapi_encode: add EQUAL_MULTI_ROWS support for slice
+ structure
 
 VA_ENC_SLICE_STRUCTURE_EQUAL_MULTI_ROWS is added to in the latest
-libva (> 1.8.0) which matches the hardware behaviour:
+libva (1.8.0) which matches the hardware behaviour:
 
 /** \brief Driver supports any number of rows per slice but they must be the same
 *       for all slices except for the last one, which must be equal or smaller
@@ -15,25 +15,25 @@ And VA_ENC_SLICE_STRUCTURE_EQUAL_ROWS is kind of deprecated for iHD
 since it's somehow introduced in [1] which is misleading from what we
 actually handles.
 
-[1]<https://github.com/intel/libva/commit/0e6d5441f19bdc674b4da3169d614d10fd644778>
-
 Signed-off-by: Linjie Fu <linjie.fu@intel.com>
 ---
- libavcodec/vaapi_encode.c | 1 +
- 1 file changed, 1 insertion(+)
+ libavcodec/vaapi_encode.c | 3 +++
+ 1 file changed, 3 insertions(+)
 
 diff --git a/libavcodec/vaapi_encode.c b/libavcodec/vaapi_encode.c
-index cb05ebd774..1433a90b54 100644
+index 363f1d4..3f15c1a 100644
 --- a/libavcodec/vaapi_encode.c
 +++ b/libavcodec/vaapi_encode.c
-@@ -1888,6 +1888,7 @@ static av_cold int vaapi_encode_init_slice_structure(AVCodecContext *avctx)
+@@ -1956,6 +1956,9 @@ static av_cold int vaapi_encode_init_slice_structure(AVCodecContext *avctx)
          req_slices = avctx->slices;
      }
      if (slice_structure & VA_ENC_SLICE_STRUCTURE_ARBITRARY_ROWS ||
++#if VA_CHECK_VERSION(1, 8, 0)
 +        slice_structure & VA_ENC_SLICE_STRUCTURE_EQUAL_MULTI_ROWS ||
++#endif
          slice_structure & VA_ENC_SLICE_STRUCTURE_ARBITRARY_MACROBLOCKS) {
          ctx->nb_slices  = req_slices;
          ctx->slice_size = ctx->slice_block_rows / ctx->nb_slices;
 -- 
-2.17.1
+2.7.4
 
