@@ -67,6 +67,9 @@ version <next>:
 - Pro Pinball Series Soundbank demuxer
 - pcm_rechunk bitstream filter
 - scdet filter
+- NotchLC decoder
+- gradients source video filter
+- MediaFoundation encoder wrapper
 
 
 version 4.2:
