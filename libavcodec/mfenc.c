@@ -637,11 +637,19 @@ static int64_t mf_encv_output_score(AVCodecContext *avctx, IMFMediaType *type)
 static int mf_encv_output_adjust(AVCodecContext *avctx, IMFMediaType *type)
 {
     MFContext *c = avctx->priv_data;
+    AVRational framerate;
 
     ff_MFSetAttributeSize((IMFAttributes *)type, &MF_MT_FRAME_SIZE, avctx->width, avctx->height);
     IMFAttributes_SetUINT32(type, &MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
 
-    ff_MFSetAttributeRatio((IMFAttributes *)type, &MF_MT_FRAME_RATE, avctx->framerate.num, avctx->framerate.den);
+    if (avctx->framerate.num > 0 && avctx->framerate.den > 0) {
+        framerate = avctx->framerate;
+    } else {
+        framerate = av_inv_q(avctx->time_base);
+        framerate.den *= avctx->ticks_per_frame;
+    }
+
+    ff_MFSetAttributeRatio((IMFAttributes *)type, &MF_MT_FRAME_RATE, framerate.num, framerate.den);
 
     // (MS HEVC supports eAVEncH265VProfile_Main_420_8 only.)
     if (avctx->codec_id == AV_CODEC_ID_H264) {
@@ -677,7 +685,7 @@ static int mf_encv_output_adjust(AVCodecContext *avctx, IMFMediaType *type)
         // "scenario" to "camera_record" sets it in CFR mode (where the default
         // is VFR), which makes the encoder avoid dropping frames.
         ICodecAPI_SetValue(c->codec_api, &ff_CODECAPI_AVEncMPVDefaultBPictureCount, FF_VAL_VT_UI4(avctx->max_b_frames));
-        avctx->has_b_frames = avctx->max_b_frames > 1 ? 1 : 0;
+        avctx->has_b_frames = avctx->max_b_frames > 0;
 
         ICodecAPI_SetValue(c->codec_api, &ff_CODECAPI_AVEncH264CABACEnable, FF_VAL_VT_BOOL(1));
 

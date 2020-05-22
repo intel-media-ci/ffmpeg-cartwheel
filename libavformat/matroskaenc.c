@@ -835,9 +835,8 @@ static void mkv_write_video_color(AVIOContext *pb, const AVStream *st,
      * plus another byte to stay clear of the end. */
     uint8_t colour[(2 + 1 + 8) * 18 + (2 + 1) + 1];
     AVIOContext buf, *dyn_cp = &buf;
-    int side_data_size = 0;
     int colorinfo_size;
-    const uint8_t *side_data;
+    const void *side_data;
 
     ffio_init_context(dyn_cp, colour, sizeof(colour), 1, NULL, NULL, NULL, NULL);
 
@@ -868,21 +867,19 @@ static void mkv_write_video_color(AVIOContext *pb, const AVStream *st,
     }
 
     side_data = av_stream_get_side_data(st, AV_PKT_DATA_CONTENT_LIGHT_LEVEL,
-                                        &side_data_size);
-    if (side_data_size) {
-        const AVContentLightMetadata *metadata =
-            (const AVContentLightMetadata*)side_data;
+                                        NULL);
+    if (side_data) {
+        const AVContentLightMetadata *metadata = side_data;
         put_ebml_uint(dyn_cp, MATROSKA_ID_VIDEOCOLORMAXCLL,  metadata->MaxCLL);
         put_ebml_uint(dyn_cp, MATROSKA_ID_VIDEOCOLORMAXFALL, metadata->MaxFALL);
     }
 
     side_data = av_stream_get_side_data(st, AV_PKT_DATA_MASTERING_DISPLAY_METADATA,
-                                        &side_data_size);
-    if (side_data_size == sizeof(AVMasteringDisplayMetadata)) {
+                                        NULL);
+    if (side_data) {
         ebml_master meta_element = start_ebml_master(
             dyn_cp, MATROSKA_ID_VIDEOCOLORMASTERINGMETA, 10 * (2 + 1 + 8));
-        const AVMasteringDisplayMetadata *metadata =
-            (const AVMasteringDisplayMetadata*)side_data;
+        const AVMasteringDisplayMetadata *metadata = side_data;
         if (metadata->has_primaries) {
             put_ebml_float(dyn_cp, MATROSKA_ID_VIDEOCOLOR_RX,
                            av_q2d(metadata->display_primaries[0][0]));
@@ -919,14 +916,13 @@ static void mkv_write_video_projection(AVFormatContext *s, AVIOContext *pb,
                                        const AVStream *st)
 {
     ebml_master projection;
-    int side_data_size = 0;
     uint8_t private[20];
 
     const AVSphericalMapping *spherical =
         (const AVSphericalMapping *)av_stream_get_side_data(st, AV_PKT_DATA_SPHERICAL,
-                                                            &side_data_size);
+                                                            NULL);
 
-    if (!side_data_size)
+    if (!spherical)
         return;
 
     if (spherical->projection != AV_SPHERICAL_EQUIRECTANGULAR      &&
@@ -1028,7 +1024,6 @@ static int mkv_write_stereo_mode(AVFormatContext *s, AVIOContext *pb,
     const AVDictionaryEntry *tag;
     MatroskaVideoStereoModeType format = MATROSKA_VIDEO_STEREOMODE_TYPE_NB;
     const AVStereo3D *stereo;
-    int side_data_size = 0;
 
     *h_width = 1;
     *h_height = 1;
@@ -1052,8 +1047,8 @@ static int mkv_write_stereo_mode(AVFormatContext *s, AVIOContext *pb,
     }
 
     stereo = (const AVStereo3D*)av_stream_get_side_data(st, AV_PKT_DATA_STEREO3D,
-                                                        &side_data_size);
-    if (side_data_size >= sizeof(AVStereo3D)) {
+                                                        NULL);
+    if (stereo) {
         switch (stereo->type) {
         case AV_STEREO3D_2D:
             format = MATROSKA_VIDEO_STEREOMODE_TYPE_MONO;
