@@ -41,11 +41,23 @@
 #define CHECK_CU(x) FF_CUDA_CHECK_DL(cuda_cu, cu, x)
 #endif
 
+typedef struct VulkanQueueCtx {
+    VkFence fence;
+    VkQueue queue;
+    int was_synchronous;
+
+    /* Buffer dependencies */
+    AVBufferRef **buf_deps;
+    int nb_buf_deps;
+    int buf_deps_alloc_size;
+} VulkanQueueCtx;
+
 typedef struct VulkanExecCtx {
     VkCommandPool pool;
-    VkCommandBuffer buf;
-    VkQueue queue;
-    VkFence fence;
+    VkCommandBuffer *bufs;
+    VulkanQueueCtx *queues;
+    int nb_queues;
+    int cur_queue_idx;
 } VulkanExecCtx;
 
 typedef struct VulkanDevicePriv {
@@ -60,9 +72,6 @@ typedef struct VulkanDevicePriv {
     /* Debug callback */
     VkDebugUtilsMessengerEXT debug_ctx;
 
-    /* Image uploading */
-    VulkanExecCtx cmd;
-
     /* Extensions */
     uint64_t extensions;
 
@@ -74,7 +83,12 @@ typedef struct VulkanDevicePriv {
 } VulkanDevicePriv;
 
 typedef struct VulkanFramesPriv {
-    VulkanExecCtx cmd;
+    /* Image conversions */
+    VulkanExecCtx conv_ctx;
+
+    /* Image transfers */
+    VulkanExecCtx upload_ctx;
+    VulkanExecCtx download_ctx;
 } VulkanFramesPriv;
 
 typedef struct AVVkFrameInternal {
@@ -88,6 +102,16 @@ typedef struct AVVkFrameInternal {
     CUexternalSemaphore cu_sem[AV_NUM_DATA_POINTERS];
 #endif
 } AVVkFrameInternal;
+
+#define GET_QUEUE_COUNT(hwctx, graph, comp, tx) (                   \
+    graph ?  hwctx->nb_graphics_queues :                            \
+    comp  ? (hwctx->nb_comp_queues ?                                \
+             hwctx->nb_comp_queues : hwctx->nb_graphics_queues) :   \
+    tx    ? (hwctx->nb_tx_queues ? hwctx->nb_tx_queues :            \
+             (hwctx->nb_comp_queues ?                               \
+              hwctx->nb_comp_queues : hwctx->nb_graphics_queues)) : \
+    0                                                               \
+)
 
 #define VK_LOAD_PFN(inst, name) PFN_##name pfn_##name = (PFN_##name)           \
                                               vkGetInstanceProcAddr(inst, #name)
@@ -499,7 +523,6 @@ static int find_device(AVHWDeviceContext *ctx, VulkanDeviceSelection *select)
     VkPhysicalDevice *devices = NULL;
     VkPhysicalDeviceIDProperties *idp = NULL;
     VkPhysicalDeviceProperties2 *prop = NULL;
-    VulkanDevicePriv *p = ctx->internal->priv;
     AVVulkanDeviceContext *hwctx = ctx->hwctx;
 
     ret = vkEnumeratePhysicalDevices(hwctx->inst, &num, NULL);
@@ -603,10 +626,9 @@ static int find_device(AVHWDeviceContext *ctx, VulkanDeviceSelection *select)
     }
 
 end:
-    if (choice > -1) {
-        p->dev_is_nvidia = (prop[choice].properties.vendorID == 0x10de);
+    if (choice > -1)
         hwctx->phys_dev = devices[choice];
-    }
+
     av_free(devices);
     av_free(prop);
     av_free(idp);
@@ -679,16 +701,19 @@ static int search_queue_families(AVHWDeviceContext *ctx, VkDeviceCreateInfo *cd)
     hwctx->queue_family_index      = graph_index;
     hwctx->queue_family_comp_index = graph_index;
     hwctx->queue_family_tx_index   = graph_index;
+    hwctx->nb_graphics_queues      = qs[graph_index].queueCount;
 
     if (comp_index != -1) {
         ADD_QUEUE(comp_index, 0, 1, tx_index < 0)
         hwctx->queue_family_tx_index   = comp_index;
         hwctx->queue_family_comp_index = comp_index;
+        hwctx->nb_comp_queues          = qs[comp_index].queueCount;
     }
 
     if (tx_index != -1) {
         ADD_QUEUE(tx_index, 0, 0, 1)
         hwctx->queue_family_tx_index = tx_index;
+        hwctx->nb_tx_queues          = qs[tx_index].queueCount;
     }
 
 #undef ADD_QUEUE
@@ -705,11 +730,11 @@ fail:
     return AVERROR(ENOMEM);
 }
 
-static int create_exec_ctx(AVHWDeviceContext *ctx, VulkanExecCtx *cmd,
-                           int queue_family_index)
+static int create_exec_ctx(AVHWFramesContext *hwfc, VulkanExecCtx *cmd,
+                           int queue_family_index, int num_queues)
 {
     VkResult ret;
-    AVVulkanDeviceContext *hwctx = ctx->hwctx;
+    AVVulkanDeviceContext *hwctx = hwfc->device_ctx->hwctx;
 
     VkCommandPoolCreateInfo cqueue_create = {
         .sType              = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -719,62 +744,205 @@ static int create_exec_ctx(AVHWDeviceContext *ctx, VulkanExecCtx *cmd,
     VkCommandBufferAllocateInfo cbuf_create = {
         .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
         .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandBufferCount = 1,
+        .commandBufferCount = num_queues,
     };
 
-    VkFenceCreateInfo fence_spawn = {
-        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-    };
+    cmd->nb_queues = num_queues;
 
-    ret = vkCreateFence(hwctx->act_dev, &fence_spawn,
-                        hwctx->alloc, &cmd->fence);
-    if (ret != VK_SUCCESS) {
-        av_log(ctx, AV_LOG_ERROR, "Failed to create frame fence: %s\n",
-               vk_ret2str(ret));
-        return AVERROR_EXTERNAL;
-    }
+    cmd->queues = av_mallocz(num_queues * sizeof(*cmd->queues));
+    if (!cmd->queues)
+        return AVERROR(ENOMEM);
 
+    cmd->bufs = av_mallocz(num_queues * sizeof(*cmd->bufs));
+    if (!cmd->bufs)
+        return AVERROR(ENOMEM);
+
+    /* Create command pool */
     ret = vkCreateCommandPool(hwctx->act_dev, &cqueue_create,
                               hwctx->alloc, &cmd->pool);
     if (ret != VK_SUCCESS) {
-        av_log(ctx, AV_LOG_ERROR, "Command pool creation failure: %s\n",
+        av_log(hwfc, AV_LOG_ERROR, "Command pool creation failure: %s\n",
                vk_ret2str(ret));
         return AVERROR_EXTERNAL;
     }
 
     cbuf_create.commandPool = cmd->pool;
 
-    ret = vkAllocateCommandBuffers(hwctx->act_dev, &cbuf_create, &cmd->buf);
+    /* Allocate command buffer */
+    ret = vkAllocateCommandBuffers(hwctx->act_dev, &cbuf_create, cmd->bufs);
     if (ret != VK_SUCCESS) {
-        av_log(ctx, AV_LOG_ERROR, "Command buffer alloc failure: %s\n",
+        av_log(hwfc, AV_LOG_ERROR, "Command buffer alloc failure: %s\n",
                vk_ret2str(ret));
         return AVERROR_EXTERNAL;
     }
 
-    vkGetDeviceQueue(hwctx->act_dev, cqueue_create.queueFamilyIndex, 0,
-                     &cmd->queue);
+    for (int i = 0; i < num_queues; i++) {
+        VulkanQueueCtx *q = &cmd->queues[i];
+        vkGetDeviceQueue(hwctx->act_dev, queue_family_index, i, &q->queue);
+        q->was_synchronous = 1;
+    }
 
     return 0;
 }
 
-static void free_exec_ctx(AVHWDeviceContext *ctx, VulkanExecCtx *cmd)
+static void free_exec_ctx(AVHWFramesContext *hwfc, VulkanExecCtx *cmd)
 {
-    AVVulkanDeviceContext *hwctx = ctx->hwctx;
+    AVVulkanDeviceContext *hwctx = hwfc->device_ctx->hwctx;
 
-    if (cmd->fence)
-        vkDestroyFence(hwctx->act_dev, cmd->fence, hwctx->alloc);
-    if (cmd->buf)
-        vkFreeCommandBuffers(hwctx->act_dev, cmd->pool, 1, &cmd->buf);
+    /* Make sure all queues have finished executing */
+    for (int i = 0; i < cmd->nb_queues; i++) {
+        VulkanQueueCtx *q = &cmd->queues[i];
+
+        if (q->fence && !q->was_synchronous) {
+            vkWaitForFences(hwctx->act_dev, 1, &q->fence, VK_TRUE, UINT64_MAX);
+            vkResetFences(hwctx->act_dev, 1, &q->fence);
+        }
+
+        /* Free the fence */
+        if (q->fence)
+            vkDestroyFence(hwctx->act_dev, q->fence, hwctx->alloc);
+
+        /* Free buffer dependencies */
+        for (int j = 0; j < q->nb_buf_deps; j++)
+            av_buffer_unref(&q->buf_deps[j]);
+        av_free(q->buf_deps);
+    }
+
+    if (cmd->bufs)
+        vkFreeCommandBuffers(hwctx->act_dev, cmd->pool, cmd->nb_queues, cmd->bufs);
     if (cmd->pool)
         vkDestroyCommandPool(hwctx->act_dev, cmd->pool, hwctx->alloc);
+
+    av_freep(&cmd->bufs);
+    av_freep(&cmd->queues);
+}
+
+static VkCommandBuffer get_buf_exec_ctx(AVHWFramesContext *hwfc, VulkanExecCtx *cmd)
+{
+    return cmd->bufs[cmd->cur_queue_idx];
+}
+
+static void unref_exec_ctx_deps(AVHWFramesContext *hwfc, VulkanExecCtx *cmd)
+{
+    VulkanQueueCtx *q = &cmd->queues[cmd->cur_queue_idx];
+
+    for (int j = 0; j < q->nb_buf_deps; j++)
+        av_buffer_unref(&q->buf_deps[j]);
+    q->nb_buf_deps = 0;
+}
+
+static int wait_start_exec_ctx(AVHWFramesContext *hwfc, VulkanExecCtx *cmd)
+{
+    VkResult ret;
+    AVVulkanDeviceContext *hwctx = hwfc->device_ctx->hwctx;
+    VulkanQueueCtx *q = &cmd->queues[cmd->cur_queue_idx];
+
+    VkCommandBufferBeginInfo cmd_start = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    };
+
+    /* Create the fence and don't wait for it initially */
+    if (!q->fence) {
+        VkFenceCreateInfo fence_spawn = {
+            .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+        };
+        ret = vkCreateFence(hwctx->act_dev, &fence_spawn, hwctx->alloc,
+                            &q->fence);
+        if (ret != VK_SUCCESS) {
+            av_log(hwfc, AV_LOG_ERROR, "Failed to queue frame fence: %s\n",
+                   vk_ret2str(ret));
+            return AVERROR_EXTERNAL;
+        }
+    } else if (!q->was_synchronous) {
+        vkWaitForFences(hwctx->act_dev, 1, &q->fence, VK_TRUE, UINT64_MAX);
+        vkResetFences(hwctx->act_dev, 1, &q->fence);
+    }
+
+    /* Discard queue dependencies */
+    unref_exec_ctx_deps(hwfc, cmd);
+
+    ret = vkBeginCommandBuffer(cmd->bufs[cmd->cur_queue_idx], &cmd_start);
+    if (ret != VK_SUCCESS) {
+        av_log(hwfc, AV_LOG_ERROR, "Unable to init command buffer: %s\n",
+               vk_ret2str(ret));
+        return AVERROR_EXTERNAL;
+    }
+
+    return 0;
+}
+
+static int add_buf_dep_exec_ctx(AVHWFramesContext *hwfc, VulkanExecCtx *cmd,
+                                AVBufferRef * const *deps, int nb_deps)
+{
+    AVBufferRef **dst;
+    VulkanQueueCtx *q = &cmd->queues[cmd->cur_queue_idx];
+
+    if (!deps || !nb_deps)
+        return 0;
+
+    dst = av_fast_realloc(q->buf_deps, &q->buf_deps_alloc_size,
+                          (q->nb_buf_deps + nb_deps) * sizeof(*dst));
+    if (!dst)
+        goto err;
+
+    q->buf_deps = dst;
+
+    for (int i = 0; i < nb_deps; i++) {
+        q->buf_deps[q->nb_buf_deps] = av_buffer_ref(deps[i]);
+        if (!q->buf_deps[q->nb_buf_deps])
+            goto err;
+        q->nb_buf_deps++;
+    }
+
+    return 0;
+
+err:
+    unref_exec_ctx_deps(hwfc, cmd);
+    return AVERROR(ENOMEM);
+}
+
+static int submit_exec_ctx(AVHWFramesContext *hwfc, VulkanExecCtx *cmd,
+                           VkSubmitInfo *s_info, int synchronous)
+{
+    VkResult ret;
+    VulkanQueueCtx *q = &cmd->queues[cmd->cur_queue_idx];
+
+    ret = vkEndCommandBuffer(cmd->bufs[cmd->cur_queue_idx]);
+    if (ret != VK_SUCCESS) {
+        av_log(hwfc, AV_LOG_ERROR, "Unable to finish command buffer: %s\n",
+               vk_ret2str(ret));
+        unref_exec_ctx_deps(hwfc, cmd);
+        return AVERROR_EXTERNAL;
+    }
+
+    s_info->pCommandBuffers = &cmd->bufs[cmd->cur_queue_idx];
+    s_info->commandBufferCount = 1;
+
+    ret = vkQueueSubmit(q->queue, 1, s_info, q->fence);
+    if (ret != VK_SUCCESS) {
+        unref_exec_ctx_deps(hwfc, cmd);
+        return AVERROR_EXTERNAL;
+    }
+
+    q->was_synchronous = synchronous;
+
+    if (synchronous) {
+        AVVulkanDeviceContext *hwctx = hwfc->device_ctx->hwctx;
+        vkWaitForFences(hwctx->act_dev, 1, &q->fence, VK_TRUE, UINT64_MAX);
+        vkResetFences(hwctx->act_dev, 1, &q->fence);
+        unref_exec_ctx_deps(hwfc, cmd);
+    } else { /* Rotate queues */
+        cmd->cur_queue_idx = (cmd->cur_queue_idx + 1) % cmd->nb_queues;
+    }
+
+    return 0;
 }
 
 static void vulkan_device_free(AVHWDeviceContext *ctx)
 {
     VulkanDevicePriv *p = ctx->internal->priv;
     AVVulkanDeviceContext *hwctx = ctx->hwctx;
-
-    free_exec_ctx(ctx, &p->cmd);
 
     vkDestroyDevice(hwctx->act_dev, hwctx->alloc);
 
@@ -804,6 +972,7 @@ static int vulkan_device_create_internal(AVHWDeviceContext *ctx,
     AVDictionaryEntry *opt_d;
     VulkanDevicePriv *p = ctx->internal->priv;
     AVVulkanDeviceContext *hwctx = ctx->hwctx;
+    VkPhysicalDeviceFeatures dev_features = { 0 };
     VkDeviceQueueCreateInfo queue_create_info[3] = {
         { .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, },
         { .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, },
@@ -812,10 +981,12 @@ static int vulkan_device_create_internal(AVHWDeviceContext *ctx,
 
     VkDeviceCreateInfo dev_info = {
         .sType                = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+        .pNext                = &hwctx->device_features,
         .pQueueCreateInfos    = queue_create_info,
         .queueCreateInfoCount = 0,
     };
 
+    hwctx->device_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
     ctx->free = vulkan_device_free;
 
     /* Create an instance if not given one */
@@ -826,15 +997,13 @@ static int vulkan_device_create_internal(AVHWDeviceContext *ctx,
     if ((err = find_device(ctx, dev_select)))
         goto end;
 
-    vkGetPhysicalDeviceProperties(hwctx->phys_dev, &p->props);
-    av_log(ctx, AV_LOG_VERBOSE, "Using device: %s\n", p->props.deviceName);
-    av_log(ctx, AV_LOG_VERBOSE, "Alignments:\n");
-    av_log(ctx, AV_LOG_VERBOSE, "    optimalBufferCopyOffsetAlignment:   %li\n",
-           p->props.limits.optimalBufferCopyOffsetAlignment);
-    av_log(ctx, AV_LOG_VERBOSE, "    optimalBufferCopyRowPitchAlignment: %li\n",
-           p->props.limits.optimalBufferCopyRowPitchAlignment);
-    av_log(ctx, AV_LOG_VERBOSE, "    minMemoryMapAlignment:              %li\n",
-           p->props.limits.minMemoryMapAlignment);
+    vkGetPhysicalDeviceFeatures(hwctx->phys_dev, &dev_features);
+#define COPY_FEATURE(DST, NAME) (DST).features.NAME = dev_features.NAME;
+    COPY_FEATURE(hwctx->device_features, shaderImageGatherExtended)
+    COPY_FEATURE(hwctx->device_features, fragmentStoresAndAtomics)
+    COPY_FEATURE(hwctx->device_features, vertexPipelineStoresAndAtomics)
+    COPY_FEATURE(hwctx->device_features, shaderInt64)
+#undef COPY_FEATURE
 
     /* Search queue family */
     if ((err = search_queue_families(ctx, &dev_info)))
@@ -879,21 +1048,34 @@ end:
 
 static int vulkan_device_init(AVHWDeviceContext *ctx)
 {
-    int err;
     uint32_t queue_num;
     AVVulkanDeviceContext *hwctx = ctx->hwctx;
     VulkanDevicePriv *p = ctx->internal->priv;
+
+    vkGetPhysicalDeviceProperties(hwctx->phys_dev, &p->props);
+    av_log(ctx, AV_LOG_VERBOSE, "Using device: %s\n", p->props.deviceName);
+    av_log(ctx, AV_LOG_VERBOSE, "Alignments:\n");
+    av_log(ctx, AV_LOG_VERBOSE, "    optimalBufferCopyOffsetAlignment:   %li\n",
+           p->props.limits.optimalBufferCopyOffsetAlignment);
+    av_log(ctx, AV_LOG_VERBOSE, "    optimalBufferCopyRowPitchAlignment: %li\n",
+           p->props.limits.optimalBufferCopyRowPitchAlignment);
+    av_log(ctx, AV_LOG_VERBOSE, "    minMemoryMapAlignment:              %li\n",
+           p->props.limits.minMemoryMapAlignment);
 
     /* Set device extension flags */
     for (int i = 0; i < hwctx->nb_enabled_dev_extensions; i++) {
         for (int j = 0; j < FF_ARRAY_ELEMS(optional_device_exts); j++) {
             if (!strcmp(hwctx->enabled_dev_extensions[i],
                         optional_device_exts[j].name)) {
+                av_log(ctx, AV_LOG_VERBOSE, "Using device extension %s\n",
+                       hwctx->enabled_dev_extensions[i]);
                 p->extensions |= optional_device_exts[j].flag;
                 break;
             }
         }
     }
+
+    p->dev_is_nvidia = (p->props.vendorID == 0x10de);
 
     vkGetPhysicalDeviceQueueFamilyProperties(hwctx->phys_dev, &queue_num, NULL);
     if (!queue_num) {
@@ -922,11 +1104,6 @@ if (n >= queue_num) {                                                           
         (hwctx->queue_family_comp_index != hwctx->queue_family_tx_index))
         p->qfs[p->num_qfs++] = hwctx->queue_family_comp_index;
 
-    /* Create exec context - if there's something invalid this will error out */
-    err = create_exec_ctx(ctx, &p->cmd, hwctx->queue_family_tx_index);
-    if (err)
-        return err;
-
     /* Get device capabilities */
     vkGetPhysicalDeviceMemoryProperties(hwctx->phys_dev, &p->mprops);
 
@@ -950,7 +1127,8 @@ static int vulkan_device_create(AVHWDeviceContext *ctx, const char *device,
 }
 
 static int vulkan_device_derive(AVHWDeviceContext *ctx,
-                                AVHWDeviceContext *src_ctx, int flags)
+                                AVHWDeviceContext *src_ctx,
+                                AVDictionary *opts, int flags)
 {
     av_unused VulkanDeviceSelection dev_select = { 0 };
 
@@ -974,7 +1152,7 @@ static int vulkan_device_derive(AVHWDeviceContext *ctx,
         if (strstr(vendor, "AMD"))
             dev_select.vendor_id = 0x1002;
 
-        return vulkan_device_create_internal(ctx, &dev_select, NULL, flags);
+        return vulkan_device_create_internal(ctx, &dev_select, opts, flags);
     }
 #endif
     case AV_HWDEVICE_TYPE_DRM: {
@@ -992,7 +1170,7 @@ static int vulkan_device_derive(AVHWDeviceContext *ctx,
 
         drmFreeDevice(&drm_dev_info);
 
-        return vulkan_device_create_internal(ctx, &dev_select, NULL, flags);
+        return vulkan_device_create_internal(ctx, &dev_select, opts, flags);
     }
 #endif
 #if CONFIG_CUDA
@@ -1011,7 +1189,7 @@ static int vulkan_device_derive(AVHWDeviceContext *ctx,
 
         dev_select.has_uuid = 1;
 
-        return vulkan_device_create_internal(ctx, &dev_select, NULL, flags);
+        return vulkan_device_create_internal(ctx, &dev_select, opts, flags);
     }
 #endif
     default:
@@ -1242,26 +1420,16 @@ enum PrepMode {
 static int prepare_frame(AVHWFramesContext *hwfc, VulkanExecCtx *ectx,
                          AVVkFrame *frame, enum PrepMode pmode)
 {
-    VkResult ret;
+    int err;
     uint32_t dst_qf;
     VkImageLayout new_layout;
     VkAccessFlags new_access;
-    AVHWDeviceContext *ctx = hwfc->device_ctx;
-    AVVulkanDeviceContext *hwctx = ctx->hwctx;
     const int planes = av_pix_fmt_count_planes(hwfc->sw_format);
 
     VkImageMemoryBarrier img_bar[AV_NUM_DATA_POINTERS] = { 0 };
 
-    VkCommandBufferBeginInfo cmd_start = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-    };
-
     VkSubmitInfo s_info = {
         .sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .commandBufferCount   = 1,
-        .pCommandBuffers      = &ectx->buf,
-
         .pSignalSemaphores    = frame->sem,
         .signalSemaphoreCount = planes,
     };
@@ -1291,9 +1459,8 @@ static int prepare_frame(AVHWFramesContext *hwfc, VulkanExecCtx *ectx,
         break;
     }
 
-    ret = vkBeginCommandBuffer(ectx->buf, &cmd_start);
-    if (ret != VK_SUCCESS)
-        return AVERROR_EXTERNAL;
+    if ((err = wait_start_exec_ctx(hwfc, ectx)))
+        return err;
 
     /* Change the image layout to something more optimal for writes.
      * This also signals the newly created semaphore, making it usable
@@ -1315,23 +1482,12 @@ static int prepare_frame(AVHWFramesContext *hwfc, VulkanExecCtx *ectx,
         frame->access[i] = img_bar[i].dstAccessMask;
     }
 
-    vkCmdPipelineBarrier(ectx->buf, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
-                         0, NULL, 0, NULL, planes, img_bar);
+    vkCmdPipelineBarrier(get_buf_exec_ctx(hwfc, ectx),
+                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         0, 0, NULL, 0, NULL, planes, img_bar);
 
-    ret = vkEndCommandBuffer(ectx->buf);
-    if (ret != VK_SUCCESS)
-        return AVERROR_EXTERNAL;
-
-    ret = vkQueueSubmit(ectx->queue, 1, &s_info, ectx->fence);
-    if (ret != VK_SUCCESS) {
-        return AVERROR_EXTERNAL;
-    } else {
-        vkWaitForFences(hwctx->act_dev, 1, &ectx->fence, VK_TRUE, UINT64_MAX);
-        vkResetFences(hwctx->act_dev, 1, &ectx->fence);
-    }
-
-    return 0;
+    return submit_exec_ctx(hwfc, ectx, &s_info, 0);
 }
 
 static int create_frame(AVHWFramesContext *hwfc, AVVkFrame **frame,
@@ -1471,6 +1627,7 @@ static AVBufferRef *vulkan_pool_alloc(void *opaque, int size)
     AVHWFramesContext *hwfc = opaque;
     AVVulkanFramesContext *hwctx = hwfc->hwctx;
     VulkanDevicePriv *p = hwfc->device_ctx->internal->priv;
+    VulkanFramesPriv *fp = hwfc->internal->priv;
     VkExportMemoryAllocateInfo eminfo[AV_NUM_DATA_POINTERS];
     VkExternalMemoryHandleTypeFlags e = 0x0;
 
@@ -1502,7 +1659,7 @@ static AVBufferRef *vulkan_pool_alloc(void *opaque, int size)
     if (err)
         goto fail;
 
-    err = prepare_frame(hwfc, &p->cmd, f, PREP_MODE_WRITE);
+    err = prepare_frame(hwfc, &fp->conv_ctx, f, PREP_MODE_WRITE);
     if (err)
         goto fail;
 
@@ -1522,7 +1679,9 @@ static void vulkan_frames_uninit(AVHWFramesContext *hwfc)
 {
     VulkanFramesPriv *fp = hwfc->internal->priv;
 
-    free_exec_ctx(hwfc->device_ctx, &fp->cmd);
+    free_exec_ctx(hwfc, &fp->conv_ctx);
+    free_exec_ctx(hwfc, &fp->upload_ctx);
+    free_exec_ctx(hwfc, &fp->download_ctx);
 }
 
 static int vulkan_frames_init(AVHWFramesContext *hwfc)
@@ -1534,39 +1693,58 @@ static int vulkan_frames_init(AVHWFramesContext *hwfc)
     AVVulkanDeviceContext *dev_hwctx = hwfc->device_ctx->hwctx;
     VulkanDevicePriv *p = hwfc->device_ctx->internal->priv;
 
-    if (hwfc->pool)
-        return 0;
-
     /* Default pool flags */
     hwctx->tiling = hwctx->tiling ? hwctx->tiling : p->use_linear_images ?
                     VK_IMAGE_TILING_LINEAR : VK_IMAGE_TILING_OPTIMAL;
 
-    hwctx->usage |= DEFAULT_USAGE_FLAGS;
+    if (!hwctx->usage)
+        hwctx->usage = DEFAULT_USAGE_FLAGS;
 
-    err = create_exec_ctx(hwfc->device_ctx, &fp->cmd,
-                          dev_hwctx->queue_family_tx_index);
+    err = create_exec_ctx(hwfc, &fp->conv_ctx,
+                          dev_hwctx->queue_family_comp_index,
+                          GET_QUEUE_COUNT(dev_hwctx, 0, 1, 0));
     if (err)
-        return err;
+        goto fail;
+
+    err = create_exec_ctx(hwfc, &fp->upload_ctx,
+                          dev_hwctx->queue_family_tx_index,
+                          GET_QUEUE_COUNT(dev_hwctx, 0, 0, 1));
+    if (err)
+        goto fail;
+
+    err = create_exec_ctx(hwfc, &fp->download_ctx,
+                          dev_hwctx->queue_family_tx_index, 1);
+    if (err)
+        goto fail;
 
     /* Test to see if allocation will fail */
     err = create_frame(hwfc, &f, hwctx->tiling, hwctx->usage,
                        hwctx->create_pnext);
-    if (err) {
-        free_exec_ctx(hwfc->device_ctx, &p->cmd);
-        return err;
-    }
+    if (err)
+        goto fail;
 
     vulkan_frame_free(hwfc, (uint8_t *)f);
 
-    hwfc->internal->pool_internal = av_buffer_pool_init2(sizeof(AVVkFrame),
-                                                         hwfc, vulkan_pool_alloc,
-                                                         NULL);
-    if (!hwfc->internal->pool_internal) {
-        free_exec_ctx(hwfc->device_ctx, &p->cmd);
-        return AVERROR(ENOMEM);
+    /* If user did not specify a pool, hwfc->pool will be set to the internal one
+     * in hwcontext.c just after this gets called */
+    if (!hwfc->pool) {
+        hwfc->internal->pool_internal = av_buffer_pool_init2(sizeof(AVVkFrame),
+                                                             hwfc, vulkan_pool_alloc,
+                                                             NULL);
+        if (!hwfc->internal->pool_internal) {
+            err = AVERROR(ENOMEM);
+            goto fail;
+        }
     }
 
     return 0;
+
+fail:
+    free_exec_ctx(hwfc, &fp->conv_ctx);
+    free_exec_ctx(hwfc, &fp->upload_ctx);
+    free_exec_ctx(hwfc, &fp->download_ctx);
+
+    return err;
 }
 
 static int vulkan_get_buffer(AVHWFramesContext *hwfc, AVFrame *frame)
@@ -1775,6 +1953,8 @@ static int vulkan_map_from_drm_frame_desc(AVHWFramesContext *hwfc, AVVkFrame **f
     AVHWDeviceContext *ctx = hwfc->device_ctx;
     AVVulkanDeviceContext *hwctx = ctx->hwctx;
     VulkanDevicePriv *p = ctx->internal->priv;
+    VulkanFramesPriv *fp = hwfc->internal->priv;
+    AVVulkanFramesContext *frames_hwctx = hwfc->hwctx;
     const AVPixFmtDescriptor *fmt_desc = av_pix_fmt_desc_get(hwfc->sw_format);
     const int has_modifiers = p->extensions & EXT_DRM_MODIFIER_FLAGS;
     VkSubresourceLayout plane_data[AV_NUM_DATA_POINTERS] = { 0 };
@@ -1874,7 +2054,7 @@ static int vulkan_map_from_drm_frame_desc(AVHWFramesContext *hwfc, AVVkFrame **f
             .flags                 = VK_IMAGE_CREATE_ALIAS_BIT,
             .tiling                = f->tiling,
             .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED, /* specs say so */
-            .usage                 = DEFAULT_USAGE_FLAGS,
+            .usage                 = frames_hwctx->usage,
             .samples               = VK_SAMPLE_COUNT_1_BIT,
             .pQueueFamilyIndices   = p->qfs,
             .queueFamilyIndexCount = p->num_qfs,
@@ -1944,7 +2124,7 @@ static int vulkan_map_from_drm_frame_desc(AVHWFramesContext *hwfc, AVVkFrame **f
     /* NOTE: This is completely uneccesary and unneeded once we can import
      * semaphores from DRM. Otherwise we have to activate the semaphores.
      * We're reusing the exec context that's also used for uploads/downloads. */
-    err = prepare_frame(hwfc, &p->cmd, f, PREP_MODE_RO_SHADER);
+    err = prepare_frame(hwfc, &fp->conv_ctx, f, PREP_MODE_RO_SHADER);
     if (err)
         goto fail;
 
@@ -2304,6 +2484,7 @@ static int vulkan_map_to_drm(AVHWFramesContext *hwfc, AVFrame *dst,
     VkResult ret;
     AVVkFrame *f = (AVVkFrame *)src->data[0];
     VulkanDevicePriv *p = hwfc->device_ctx->internal->priv;
+    VulkanFramesPriv *fp = hwfc->internal->priv;
     AVVulkanDeviceContext *hwctx = hwfc->device_ctx->hwctx;
     const int planes = av_pix_fmt_count_planes(hwfc->sw_format);
     VK_LOAD_PFN(hwctx->inst, vkGetMemoryFdKHR);
@@ -2315,7 +2496,7 @@ static int vulkan_map_to_drm(AVHWFramesContext *hwfc, AVFrame *dst,
     if (!drm_desc)
         return AVERROR(ENOMEM);
 
-    err = prepare_frame(hwfc, &p->cmd, f, PREP_MODE_EXTERNAL_EXPORT);
+    err = prepare_frame(hwfc, &fp->conv_ctx, f, PREP_MODE_EXTERNAL_EXPORT);
     if (err < 0)
         goto end;
 
@@ -2451,18 +2632,22 @@ typedef struct ImageBuffer {
     VkMemoryPropertyFlagBits flags;
 } ImageBuffer;
 
-static void free_buf(AVHWDeviceContext *ctx, ImageBuffer *buf)
+static void free_buf(void *opaque, uint8_t *data)
 {
+    AVHWDeviceContext *ctx = opaque;
     AVVulkanDeviceContext *hwctx = ctx->hwctx;
-    if (!buf)
-        return;
+    ImageBuffer *vkbuf = (ImageBuffer *)data;
 
-    vkDestroyBuffer(hwctx->act_dev, buf->buf, hwctx->alloc);
-    vkFreeMemory(hwctx->act_dev, buf->mem, hwctx->alloc);
+    if (vkbuf->buf)
+        vkDestroyBuffer(hwctx->act_dev, vkbuf->buf, hwctx->alloc);
+    if (vkbuf->mem)
+        vkFreeMemory(hwctx->act_dev, vkbuf->mem, hwctx->alloc);
+
+    av_free(data);
 }
 
-static int create_buf(AVHWDeviceContext *ctx, ImageBuffer *buf, int height,
-                      int *stride, VkBufferUsageFlags usage,
+static int create_buf(AVHWDeviceContext *ctx, AVBufferRef **buf,
+                      int height, int *stride, VkBufferUsageFlags usage,
                       VkMemoryPropertyFlagBits flags, void *create_pnext,
                       void *alloc_pnext)
 {
@@ -2479,34 +2664,44 @@ static int create_buf(AVHWDeviceContext *ctx, ImageBuffer *buf, int height,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
     };
 
+    ImageBuffer *vkbuf = av_mallocz(sizeof(*vkbuf));
+    if (!vkbuf)
+        return AVERROR(ENOMEM);
+
     *stride = FFALIGN(*stride, p->props.limits.optimalBufferCopyRowPitchAlignment);
     buf_spawn.size = height*(*stride);
 
-    ret = vkCreateBuffer(hwctx->act_dev, &buf_spawn, NULL, &buf->buf);
+    ret = vkCreateBuffer(hwctx->act_dev, &buf_spawn, NULL, &vkbuf->buf);
     if (ret != VK_SUCCESS) {
         av_log(ctx, AV_LOG_ERROR, "Failed to create buffer: %s\n",
                vk_ret2str(ret));
         return AVERROR_EXTERNAL;
     }
 
-    vkGetBufferMemoryRequirements(hwctx->act_dev, buf->buf, &req);
+    vkGetBufferMemoryRequirements(hwctx->act_dev, vkbuf->buf, &req);
 
-    err = alloc_mem(ctx, &req, flags, alloc_pnext, &buf->flags, &buf->mem);
+    err = alloc_mem(ctx, &req, flags, alloc_pnext, &vkbuf->flags, &vkbuf->mem);
     if (err)
         return err;
 
-    ret = vkBindBufferMemory(hwctx->act_dev, buf->buf, buf->mem, 0);
+    ret = vkBindBufferMemory(hwctx->act_dev, vkbuf->buf, vkbuf->mem, 0);
     if (ret != VK_SUCCESS) {
         av_log(ctx, AV_LOG_ERROR, "Failed to bind memory to buffer: %s\n",
                vk_ret2str(ret));
-        free_buf(ctx, buf);
+        free_buf(ctx, (uint8_t *)vkbuf);
         return AVERROR_EXTERNAL;
+    }
+
+    *buf = av_buffer_create((uint8_t *)vkbuf, sizeof(*vkbuf), free_buf, ctx, 0);
+    if (!(*buf)) {
+        free_buf(ctx, (uint8_t *)vkbuf);
+        return AVERROR(ENOMEM);
     }
 
     return 0;
 }
 
-static int map_buffers(AVHWDeviceContext *ctx, ImageBuffer *buf, uint8_t *mem[],
+static int map_buffers(AVHWDeviceContext *ctx, AVBufferRef **bufs, uint8_t *mem[],
                        int nb_buffers, int invalidate)
 {
     VkResult ret;
@@ -2515,7 +2710,8 @@ static int map_buffers(AVHWDeviceContext *ctx, ImageBuffer *buf, uint8_t *mem[],
     int invalidate_count = 0;
 
     for (int i = 0; i < nb_buffers; i++) {
-        ret = vkMapMemory(hwctx->act_dev, buf[i].mem, 0,
+        ImageBuffer *vkbuf = (ImageBuffer *)bufs[i]->data;
+        ret = vkMapMemory(hwctx->act_dev, vkbuf->mem, 0,
                           VK_WHOLE_SIZE, 0, (void **)&mem[i]);
         if (ret != VK_SUCCESS) {
             av_log(ctx, AV_LOG_ERROR, "Failed to map buffer memory: %s\n",
@@ -2528,12 +2724,13 @@ static int map_buffers(AVHWDeviceContext *ctx, ImageBuffer *buf, uint8_t *mem[],
         return 0;
 
     for (int i = 0; i < nb_buffers; i++) {
+        ImageBuffer *vkbuf = (ImageBuffer *)bufs[i]->data;
         const VkMappedMemoryRange ival_buf = {
             .sType  = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
-            .memory = buf[i].mem,
+            .memory = vkbuf->mem,
             .size   = VK_WHOLE_SIZE,
         };
-        if (buf[i].flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+        if (vkbuf->flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
             continue;
         invalidate_ctx[invalidate_count++] = ival_buf;
     }
@@ -2549,7 +2746,7 @@ static int map_buffers(AVHWDeviceContext *ctx, ImageBuffer *buf, uint8_t *mem[],
     return 0;
 }
 
-static int unmap_buffers(AVHWDeviceContext *ctx, ImageBuffer *buf,
+static int unmap_buffers(AVHWDeviceContext *ctx, AVBufferRef **bufs,
                          int nb_buffers, int flush)
 {
     int err = 0;
@@ -2560,12 +2757,13 @@ static int unmap_buffers(AVHWDeviceContext *ctx, ImageBuffer *buf,
 
     if (flush) {
         for (int i = 0; i < nb_buffers; i++) {
+            ImageBuffer *vkbuf = (ImageBuffer *)bufs[i]->data;
             const VkMappedMemoryRange flush_buf = {
                 .sType  = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
-                .memory = buf[i].mem,
+                .memory = vkbuf->mem,
                 .size   = VK_WHOLE_SIZE,
             };
-            if (buf[i].flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+            if (vkbuf->flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
                 continue;
             flush_ctx[flush_count++] = flush_buf;
         }
@@ -2580,19 +2778,21 @@ static int unmap_buffers(AVHWDeviceContext *ctx, ImageBuffer *buf,
         }
     }
 
-    for (int i = 0; i < nb_buffers; i++)
-        vkUnmapMemory(hwctx->act_dev, buf[i].mem);
+    for (int i = 0; i < nb_buffers; i++) {
+        ImageBuffer *vkbuf = (ImageBuffer *)bufs[i]->data;
+        vkUnmapMemory(hwctx->act_dev, vkbuf->mem);
+    }
 
     return err;
 }
 
-static int transfer_image_buf(AVHWDeviceContext *ctx, AVVkFrame *frame,
-                              ImageBuffer *buffer, const int *buf_stride, int w,
+static int transfer_image_buf(AVHWFramesContext *hwfc, const AVFrame *f,
+                              AVBufferRef **bufs, const int *buf_stride, int w,
                               int h, enum AVPixelFormat pix_fmt, int to_buf)
 {
-    VkResult ret;
-    AVVulkanDeviceContext *hwctx = ctx->hwctx;
-    VulkanDevicePriv *s = ctx->internal->priv;
+    int err;
+    AVVkFrame *frame = (AVVkFrame *)f->data[0];
+    VulkanFramesPriv *fp = hwfc->internal->priv;
 
     int bar_num = 0;
     VkPipelineStageFlagBits sem_wait_dst[AV_NUM_DATA_POINTERS];
@@ -2600,17 +2800,12 @@ static int transfer_image_buf(AVHWDeviceContext *ctx, AVVkFrame *frame,
     const int planes = av_pix_fmt_count_planes(pix_fmt);
     const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(pix_fmt);
 
-    VkCommandBufferBeginInfo cmd_start = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-    };
-
     VkImageMemoryBarrier img_bar[AV_NUM_DATA_POINTERS] = { 0 };
+    VulkanExecCtx *ectx = to_buf ? &fp->download_ctx : &fp->upload_ctx;
+    VkCommandBuffer cmd_buf = get_buf_exec_ctx(hwfc, ectx);
 
     VkSubmitInfo s_info = {
         .sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .commandBufferCount   = 1,
-        .pCommandBuffers      = &s->cmd.buf,
         .pSignalSemaphores    = frame->sem,
         .pWaitSemaphores      = frame->sem,
         .pWaitDstStageMask    = sem_wait_dst,
@@ -2618,12 +2813,8 @@ static int transfer_image_buf(AVHWDeviceContext *ctx, AVVkFrame *frame,
         .waitSemaphoreCount   = planes,
     };
 
-    ret = vkBeginCommandBuffer(s->cmd.buf, &cmd_start);
-    if (ret != VK_SUCCESS) {
-        av_log(ctx, AV_LOG_ERROR, "Unable to init command buffer: %s\n",
-               vk_ret2str(ret));
-        return AVERROR_EXTERNAL;
-    }
+    if ((err = wait_start_exec_ctx(hwfc, ectx)))
+        return err;
 
     /* Change the image layout to something more optimal for transfers */
     for (int i = 0; i < planes; i++) {
@@ -2657,12 +2848,13 @@ static int transfer_image_buf(AVHWDeviceContext *ctx, AVVkFrame *frame,
     }
 
     if (bar_num)
-        vkCmdPipelineBarrier(s->cmd.buf, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        vkCmdPipelineBarrier(cmd_buf, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                              VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
                              0, NULL, 0, NULL, bar_num, img_bar);
 
     /* Schedule a copy for each plane */
     for (int i = 0; i < planes; i++) {
+        ImageBuffer *vkbuf = (ImageBuffer *)bufs[i]->data;
         const int p_w = i > 0 ? AV_CEIL_RSHIFT(w, desc->log2_chroma_w) : w;
         const int p_h = i > 0 ? AV_CEIL_RSHIFT(h, desc->log2_chroma_h) : h;
         VkBufferImageCopy buf_reg = {
@@ -2680,33 +2872,33 @@ static int transfer_image_buf(AVHWDeviceContext *ctx, AVVkFrame *frame,
         };
 
         if (to_buf)
-            vkCmdCopyImageToBuffer(s->cmd.buf, frame->img[i], frame->layout[i],
-                                   buffer[i].buf, 1, &buf_reg);
+            vkCmdCopyImageToBuffer(cmd_buf, frame->img[i], frame->layout[i],
+                                   vkbuf->buf, 1, &buf_reg);
         else
-            vkCmdCopyBufferToImage(s->cmd.buf, buffer[i].buf, frame->img[i],
+            vkCmdCopyBufferToImage(cmd_buf, vkbuf->buf, frame->img[i],
                                    frame->layout[i], 1, &buf_reg);
     }
 
-    ret = vkEndCommandBuffer(s->cmd.buf);
-    if (ret != VK_SUCCESS) {
-        av_log(ctx, AV_LOG_ERROR, "Unable to finish command buffer: %s\n",
-               vk_ret2str(ret));
-        return AVERROR_EXTERNAL;
-    }
-
-    /* Wait for the download/upload to finish if uploading, otherwise the
-     * semaphore will take care of synchronization when uploading */
-    ret = vkQueueSubmit(s->cmd.queue, 1, &s_info, s->cmd.fence);
-    if (ret != VK_SUCCESS) {
-        av_log(ctx, AV_LOG_ERROR, "Unable to submit command buffer: %s\n",
-               vk_ret2str(ret));
-        return AVERROR_EXTERNAL;
+    /* When uploading, do this asynchronously if the source is refcounted by
+     * keeping the buffers as a submission dependency.
+     * The hwcontext is guaranteed to not be freed until all frames are freed
+     * in the frames_unint function.
+     * When downloading to buffer, do this synchronously and wait for the
+     * queue submission to finish executing */
+    if (!to_buf) {
+        int ref;
+        for (ref = 0; ref < AV_NUM_DATA_POINTERS; ref++) {
+            if (!f->buf[ref])
+                break;
+            if ((err = add_buf_dep_exec_ctx(hwfc, ectx, &f->buf[ref], 1)))
+                return err;
+        }
+        if (ref && (err = add_buf_dep_exec_ctx(hwfc, ectx, bufs, planes)))
+            return err;
+        return submit_exec_ctx(hwfc, ectx, &s_info, !ref);
     } else {
-        vkWaitForFences(hwctx->act_dev, 1, &s->cmd.fence, VK_TRUE, UINT64_MAX);
-        vkResetFences(hwctx->act_dev, 1, &s->cmd.fence);
+        return submit_exec_ctx(hwfc, ectx, &s_info,    1);
     }
-
-    return 0;
 }
 
 /* Technically we can use VK_EXT_external_memory_host to upload and download,
@@ -2721,7 +2913,7 @@ static int vulkan_transfer_data_from_mem(AVHWFramesContext *hwfc, AVFrame *dst,
     AVFrame tmp;
     AVVkFrame *f = (AVVkFrame *)dst->data[0];
     AVHWDeviceContext *dev_ctx = hwfc->device_ctx;
-    ImageBuffer buf[AV_NUM_DATA_POINTERS] = { { 0 } };
+    AVBufferRef *bufs[AV_NUM_DATA_POINTERS] = { 0 };
     const int planes = av_pix_fmt_count_planes(src->format);
     int log2_chroma = av_pix_fmt_desc_get(src->format)->log2_chroma_h;
 
@@ -2743,11 +2935,11 @@ static int vulkan_transfer_data_from_mem(AVHWFramesContext *hwfc, AVFrame *dst,
 
         err = vulkan_map_frame_to_mem(hwfc, map, dst, AV_HWFRAME_MAP_WRITE);
         if (err)
-            goto end;
+            return err;
 
         err = av_frame_copy(map, src);
         av_frame_free(&map);
-        goto end;
+        return err;
     }
 
     /* Create buffers */
@@ -2756,7 +2948,7 @@ static int vulkan_transfer_data_from_mem(AVHWFramesContext *hwfc, AVFrame *dst,
         int p_height = i > 0 ? AV_CEIL_RSHIFT(h, log2_chroma) : h;
 
         tmp.linesize[i] = FFABS(src->linesize[i]);
-        err = create_buf(dev_ctx, &buf[i], p_height,
+        err = create_buf(dev_ctx, &bufs[i], p_height,
                          &tmp.linesize[i], VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, NULL, NULL);
         if (err)
@@ -2764,22 +2956,22 @@ static int vulkan_transfer_data_from_mem(AVHWFramesContext *hwfc, AVFrame *dst,
     }
 
     /* Map, copy image to buffer, unmap */
-    if ((err = map_buffers(dev_ctx, buf, tmp.data, planes, 0)))
+    if ((err = map_buffers(dev_ctx, bufs, tmp.data, planes, 0)))
         goto end;
 
     av_image_copy(tmp.data, tmp.linesize, (const uint8_t **)src->data,
                   src->linesize, src->format, src->width, src->height);
 
-    if ((err = unmap_buffers(dev_ctx, buf, planes, 1)))
+    if ((err = unmap_buffers(dev_ctx, bufs, planes, 1)))
         goto end;
 
     /* Copy buffers to image */
-    err = transfer_image_buf(dev_ctx, f, buf, tmp.linesize,
+    err = transfer_image_buf(hwfc, dst, bufs, tmp.linesize,
                              src->width, src->height, src->format, 0);
 
 end:
     for (int i = 0; i < planes; i++)
-        free_buf(dev_ctx, &buf[i]);
+        av_buffer_unref(&bufs[i]);
 
     return err;
 }
@@ -2881,7 +3073,7 @@ static int vulkan_transfer_data_to_mem(AVHWFramesContext *hwfc, AVFrame *dst,
     AVFrame tmp;
     AVVkFrame *f = (AVVkFrame *)src->data[0];
     AVHWDeviceContext *dev_ctx = hwfc->device_ctx;
-    ImageBuffer buf[AV_NUM_DATA_POINTERS] = { { 0 } };
+    AVBufferRef *bufs[AV_NUM_DATA_POINTERS] = { 0 };
     const int planes = av_pix_fmt_count_planes(dst->format);
     int log2_chroma = av_pix_fmt_desc_get(dst->format)->log2_chroma_h;
 
@@ -2911,28 +3103,30 @@ static int vulkan_transfer_data_to_mem(AVHWFramesContext *hwfc, AVFrame *dst,
         int p_height = i > 0 ? AV_CEIL_RSHIFT(h, log2_chroma) : h;
 
         tmp.linesize[i] = FFABS(dst->linesize[i]);
-        err = create_buf(dev_ctx, &buf[i], p_height,
+        err = create_buf(dev_ctx, &bufs[i], p_height,
                          &tmp.linesize[i], VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, NULL, NULL);
+        if (err)
+            goto end;
     }
 
     /* Copy image to buffer */
-    if ((err = transfer_image_buf(dev_ctx, f, buf, tmp.linesize,
+    if ((err = transfer_image_buf(hwfc, src, bufs, tmp.linesize,
                                   dst->width, dst->height, dst->format, 1)))
         goto end;
 
     /* Map, copy buffer to frame, unmap */
-    if ((err = map_buffers(dev_ctx, buf, tmp.data, planes, 1)))
+    if ((err = map_buffers(dev_ctx, bufs, tmp.data, planes, 1)))
         goto end;
 
     av_image_copy(dst->data, dst->linesize, (const uint8_t **)tmp.data,
                   tmp.linesize, dst->format, dst->width, dst->height);
 
-    err = unmap_buffers(dev_ctx, buf, planes, 0);
+    err = unmap_buffers(dev_ctx, bufs, planes, 0);
 
 end:
     for (int i = 0; i < planes; i++)
-        free_buf(dev_ctx, &buf[i]);
+        av_buffer_unref(&bufs[i]);
 
     return err;
 }

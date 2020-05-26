@@ -274,7 +274,6 @@ static int parse_filename(char *filename, char **representation_id,
                           char **initialization_pattern, char **media_pattern) {
     char *underscore_pos = NULL;
     char *period_pos = NULL;
-    char *temp_pos = NULL;
     char *filename_str = av_strdup(filename);
     int ret = 0;
 
@@ -282,16 +281,12 @@ static int parse_filename(char *filename, char **representation_id,
         ret = AVERROR(ENOMEM);
         goto end;
     }
-    temp_pos = av_stristr(filename_str, "_");
-    while (temp_pos) {
-        underscore_pos = temp_pos + 1;
-        temp_pos = av_stristr(temp_pos + 1, "_");
-    }
+    underscore_pos = strrchr(filename_str, '_');
     if (!underscore_pos) {
         ret = AVERROR_INVALIDDATA;
         goto end;
     }
-    period_pos = av_stristr(underscore_pos, ".");
+    period_pos = strchr(++underscore_pos, '.');
     if (!period_pos) {
         ret = AVERROR_INVALIDDATA;
         goto end;
@@ -425,18 +420,6 @@ static int write_adaptation_set(AVFormatContext *s, int as_index)
     return 0;
 }
 
-static int to_integer(char *p, int len)
-{
-    int ret;
-    char *q = av_malloc(len);
-    if (!q)
-        return AVERROR(ENOMEM);
-    av_strlcpy(q, p, len);
-    ret = atoi(q);
-    av_free(q);
-    return ret;
-}
-
 static int parse_adaptation_sets(AVFormatContext *s)
 {
     WebMDashMuxContext *w = s->priv_data;
@@ -449,10 +432,16 @@ static int parse_adaptation_sets(AVFormatContext *s)
     }
     // syntax id=0,streams=0,1,2 id=1,streams=3,4 and so on
     state = new_set;
-    while (p < w->adaptation_sets + strlen(w->adaptation_sets)) {
-        if (*p == ' ')
+    while (1) {
+        if (*p == '\0') {
+            if (state == new_set)
+                break;
+            else
+                return AVERROR(EINVAL);
+        } else if (state == new_set && *p == ' ') {
+            p++;
             continue;
-        else if (state == new_set && !strncmp(p, "id=", 3)) {
+        } else if (state == new_set && !strncmp(p, "id=", 3)) {
             void *mem = av_realloc(w->as, sizeof(*w->as) * (w->nb_as + 1));
             const char *comma;
             if (mem == NULL)
@@ -477,18 +466,18 @@ static int parse_adaptation_sets(AVFormatContext *s)
             state = parsing_streams;
         } else if (state == parsing_streams) {
             struct AdaptationSet *as = &w->as[w->nb_as - 1];
+            int64_t num;
             int ret = av_reallocp_array(&as->streams, ++as->nb_streams,
                                         sizeof(*as->streams));
             if (ret < 0)
                 return ret;
-            q = p;
-            while (*q != '\0' && *q != ',' && *q != ' ') q++;
-            as->streams[as->nb_streams - 1] = to_integer(p, q - p + 1);
-            if (as->streams[as->nb_streams - 1] < 0 ||
-                as->streams[as->nb_streams - 1] >= s->nb_streams) {
+            num = strtoll(p, &q, 10);
+            if (!av_isdigit(*p) || (*q != ' ' && *q != '\0' && *q != ',') ||
+                num < 0 || num >= s->nb_streams) {
                 av_log(s, AV_LOG_ERROR, "Invalid value for 'streams' in adapation_sets.\n");
                 return AVERROR(EINVAL);
             }
+            as->streams[as->nb_streams - 1] = num;
             if (*q == '\0') break;
             if (*q == ' ') state = new_set;
             p = ++q;

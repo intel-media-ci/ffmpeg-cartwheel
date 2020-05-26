@@ -1004,7 +1004,7 @@ static void parse_id3(AVFormatContext *s, AVIOContext *pb,
     ff_id3v2_read_dict(pb, metadata, ID3v2_DEFAULT_MAGIC, extra_meta);
     for (meta = *extra_meta; meta; meta = meta->next) {
         if (!strcmp(meta->tag, "PRIV")) {
-            ID3v2ExtraMetaPRIV *priv = meta->data;
+            ID3v2ExtraMetaPRIV *priv = &meta->data.priv;
             if (priv->datasize == 8 && !strcmp(priv->owner, id3_priv_owner_ts)) {
                 /* 33-bit MPEG timestamp */
                 int64_t ts = AV_RB64(priv->data);
@@ -1015,7 +1015,7 @@ static void parse_id3(AVFormatContext *s, AVIOContext *pb,
                     av_log(s, AV_LOG_ERROR, "Invalid HLS ID3 audio timestamp %"PRId64"\n", ts);
             }
         } else if (!strcmp(meta->tag, "APIC") && apic)
-            *apic = meta->data;
+            *apic = &meta->data.apic;
     }
 }
 
@@ -1070,12 +1070,12 @@ static void handle_id3(AVIOContext *pb, struct playlist *pls)
 
         /* get picture attachment and set text metadata */
         if (pls->ctx->nb_streams)
-            ff_id3v2_parse_apic(pls->ctx, &extra_meta);
+            ff_id3v2_parse_apic(pls->ctx, extra_meta);
         else
             /* demuxer not yet opened, defer picture attachment */
             pls->id3_deferred_extra = extra_meta;
 
-        ff_id3v2_parse_priv_dict(&metadata, &extra_meta);
+        ff_id3v2_parse_priv_dict(&metadata, extra_meta);
         av_dict_copy(&pls->ctx->metadata, metadata, 0);
         pls->id3_initial = metadata;
 
@@ -1965,9 +1965,9 @@ static int hls_read_header(AVFormatContext *s)
             goto fail;
 
         if (pls->id3_deferred_extra && pls->ctx->nb_streams == 1) {
-            ff_id3v2_parse_apic(pls->ctx, &pls->id3_deferred_extra);
+            ff_id3v2_parse_apic(pls->ctx, pls->id3_deferred_extra);
             avformat_queue_attached_pictures(pls->ctx);
-            ff_id3v2_parse_priv(pls->ctx, &pls->id3_deferred_extra);
+            ff_id3v2_parse_priv(pls->ctx, pls->id3_deferred_extra);
             ff_id3v2_free_extra_meta(&pls->id3_deferred_extra);
         }
 
