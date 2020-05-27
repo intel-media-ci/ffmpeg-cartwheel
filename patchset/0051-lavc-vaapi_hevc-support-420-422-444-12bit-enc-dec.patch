@@ -1,4 +1,4 @@
-From 868cd05daf180f134035ca7920ecb31dd5fc8937 Mon Sep 17 00:00:00 2001
+From a342a499e00b98a112a028a5adf466610b61c703 Mon Sep 17 00:00:00 2001
 From: Fei Wang <fei.w.wang@intel.com>
 Date: Thu, 30 Apr 2020 09:43:55 +0800
 Subject: [PATCH 1/2] lavc/vaapi_hevc: support 420/422/444 12bit enc/dec.
@@ -16,7 +16,7 @@ ffmpeg -hwaccel vaapi -hwaccel_device /dev/dri/renderD128 -v debug -i GENERAL_12
 ffmpeg -hwaccel vaapi -hwaccel_device /dev/dri/renderD128 -v debug -i GENERAL_12b_444_RExt_Sony_2.bit -vsync passthrough -y ffmpeg.vaapi.yuv
 ---
  libavcodec/hevcdec.c             | 12 ++++++
- libavcodec/vaapi_decode.c        | 13 +++++-
+ libavcodec/vaapi_decode.c        | 17 ++++++++
  libavcodec/vaapi_encode.c        |  5 +++
  libavcodec/vaapi_encode_h265.c   |  6 +++
  libavcodec/vaapi_hevc.c          |  9 ++++
@@ -24,7 +24,7 @@ ffmpeg -hwaccel vaapi -hwaccel_device /dev/dri/renderD128 -v debug -i GENERAL_12
  libavutil/pixdesc.c              | 73 ++++++++++++++++++++++++++++++++
  libavutil/pixfmt.h               | 11 +++++
  tests/ref/fate/sws-pixdesc-query | 27 ++++++++++++
- 9 files changed, 165 insertions(+), 1 deletion(-)
+ 9 files changed, 170 insertions(+)
 
 diff --git a/libavcodec/hevcdec.c b/libavcodec/hevcdec.c
 index 69481a66ea..972f134c50 100644
@@ -53,7 +53,7 @@ index 69481a66ea..972f134c50 100644
          break;
      }
 diff --git a/libavcodec/vaapi_decode.c b/libavcodec/vaapi_decode.c
-index f3147242ef..904d4e5f81 100644
+index f3147242ef..ace515b907 100644
 --- a/libavcodec/vaapi_decode.c
 +++ b/libavcodec/vaapi_decode.c
 @@ -274,6 +274,15 @@ static const struct {
@@ -72,14 +72,25 @@ index f3147242ef..904d4e5f81 100644
  #ifdef VA_FOURCC_I010
      MAP(I010, YUV420P10),
  #endif
-@@ -335,7 +344,9 @@ static int vaapi_decode_find_best_format(AVCodecContext *avctx,
-         format = vaapi_format_map[j].pix_fmt;
+@@ -289,6 +298,7 @@ static int vaapi_decode_find_best_format(AVCodecContext *avctx,
+     VAStatus vas;
+     VASurfaceAttrib *attr;
+     enum AVPixelFormat source_format, best_format, format;
++    const AVPixFmtDescriptor *desc, *desc_s;
+     uint32_t best_fourcc, fourcc;
+     int i, j, nb_attr;
+ 
+@@ -336,6 +346,13 @@ static int vaapi_decode_find_best_format(AVCodecContext *avctx,
          av_log(avctx, AV_LOG_DEBUG, "Considering format %#x -> %s.\n",
                 fourcc, av_get_pix_fmt_name(format));
--
-+        if (av_get_bits_per_pixel(av_pix_fmt_desc_get(source_format)) !=
-+            av_get_bits_per_pixel(av_pix_fmt_desc_get(format)))
-+            continue;
+ 
++        if (best_format != AV_PIX_FMT_NONE) {
++            desc = av_pix_fmt_desc_get(format);
++            desc_s = av_pix_fmt_desc_get(source_format);
++            if (desc->comp[0].depth != desc_s->comp[0].depth)
++                continue;
++        }
++
          best_format = av_find_best_pix_fmt_of_2(format, best_format,
                                                  source_format, 0, NULL);
          if (format == best_format)
@@ -137,7 +148,7 @@ index 027612dc99..7d68861c1e 100644
      av_log(avctx, AV_LOG_WARNING, "HEVC profile %s is "
             "not supported with this VA version.\n", profile->name);
 diff --git a/libavutil/hwcontext_vaapi.c b/libavutil/hwcontext_vaapi.c
-index a7b8dc46f7..c629092ff1 100644
+index a1491df697..c8e8352992 100644
 --- a/libavutil/hwcontext_vaapi.c
 +++ b/libavutil/hwcontext_vaapi.c
 @@ -130,6 +130,16 @@ static const VAAPIFormatDescriptor vaapi_format_map[] = {
