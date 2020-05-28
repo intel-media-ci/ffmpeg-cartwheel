@@ -148,6 +148,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     case AV_CODEC_ID_G2M:         maxpixels  /= 64;    break;
     case AV_CODEC_ID_GDV:         maxpixels  /= 512;   break;
     case AV_CODEC_ID_GIF:         maxpixels  /= 16;    break;
+    case AV_CODEC_ID_HAP:         maxpixels  /= 128;   break;
+    case AV_CODEC_ID_HEVC:        maxpixels  /= 16384; break;
     case AV_CODEC_ID_HNM4_VIDEO:  maxpixels  /= 128;   break;
     case AV_CODEC_ID_IFF_ILBM:    maxpixels  /= 128;   break;
     case AV_CODEC_ID_INDEO4:      maxpixels  /= 128;   break;
@@ -206,7 +208,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
             if (flags & 8)
                 ctx->err_recognition |= AV_EF_EXPLODE;
         }
-        if (flags & 0x10)
+        if ((flags & 0x10) && c->id != AV_CODEC_ID_H264)
             ctx->flags2 |= AV_CODEC_FLAG2_FAST;
 
         if (flags & 0x40)
