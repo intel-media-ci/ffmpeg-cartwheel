@@ -336,7 +336,7 @@ static int read_zp_coefficients(AVFilterContext *ctx, char *item_str, int nb_ite
     return 0;
 }
 
-static const char *format[] = { "%lf", "%lf %lfi", "%lf %lfr", "%lf %lfd" };
+static const char *format[] = { "%lf", "%lf %lfi", "%lf %lfr", "%lf %lfd", "%lf %lfi" };
 
 static int read_channels(AVFilterContext *ctx, int channels, uint8_t *item_str, int ab)
 {
@@ -385,45 +385,32 @@ static int read_channels(AVFilterContext *ctx, int channels, uint8_t *item_str, 
     return 0;
 }
 
-static void multiply(double wre, double wim, int npz, double *coeffs)
+static void cmul(double re, double im, double re2, double im2, double *RE, double *IM)
 {
-    double nwre = -wre, nwim = -wim;
-    double cre, cim;
-    int i;
-
-    for (i = npz; i >= 1; i--) {
-        cre = coeffs[2 * i + 0];
-        cim = coeffs[2 * i + 1];
-
-        coeffs[2 * i + 0] = (nwre * cre - nwim * cim) + coeffs[2 * (i - 1) + 0];
-        coeffs[2 * i + 1] = (nwre * cim + nwim * cre) + coeffs[2 * (i - 1) + 1];
-    }
-
-    cre = coeffs[0];
-    cim = coeffs[1];
-    coeffs[0] = nwre * cre - nwim * cim;
-    coeffs[1] = nwre * cim + nwim * cre;
+    *RE = re * re2 - im * im2;
+    *IM = re * im2 + re2 * im;
 }
 
-static int expand(AVFilterContext *ctx, double *pz, int nb, double *coeffs)
+static int expand(AVFilterContext *ctx, double *pz, int n, double *coefs)
 {
-    int i;
+    coefs[2 * n] = 1.0;
 
-    coeffs[0] = 1.0;
-    coeffs[1] = 0.0;
+    for (int i = 1; i <= n; i++) {
+        for (int j = n - i; j < n; j++) {
+            double re, im;
 
-    for (i = 0; i < nb; i++) {
-        coeffs[2 * (i + 1)    ] = 0.0;
-        coeffs[2 * (i + 1) + 1] = 0.0;
+            cmul(coefs[2 * (j + 1)], coefs[2 * (j + 1) + 1],
+                 pz[2 * (i - 1)], pz[2 * (i - 1) + 1], &re, &im);
+
+            coefs[2 * j]     -= re;
+            coefs[2 * j + 1] -= im;
+        }
     }
 
-    for (i = 0; i < nb; i++)
-        multiply(pz[2 * i], pz[2 * i + 1], nb, coeffs);
-
-    for (i = 0; i < nb + 1; i++) {
-        if (fabs(coeffs[2 * i + 1]) > FLT_EPSILON) {
-            av_log(ctx, AV_LOG_ERROR, "coeff: %f of z^%d is not real; poles/zeros are not complex conjugates.\n",
-                   coeffs[2 * i + 1], i);
+    for (int i = 0; i < n + 1; i++) {
+        if (fabs(coefs[2 * i + 1]) > FLT_EPSILON) {
+            av_log(ctx, AV_LOG_ERROR, "coefs: %f of z^%d is not real; poles/zeros are not complex conjugates.\n",
+                   coefs[2 * i + 1], i);
             return AVERROR(EINVAL);
         }
     }
@@ -468,8 +455,8 @@ static int convert_zp2tf(AVFilterContext *ctx, int channels)
         IIRChannel *iir = &s->iir[ch];
         double *topc, *botc;
 
-        topc = av_calloc((iir->nb_ab[0] + 1) * 2, sizeof(*topc));
-        botc = av_calloc((iir->nb_ab[1] + 1) * 2, sizeof(*botc));
+        topc = av_calloc((iir->nb_ab[1] + 1) * 2, sizeof(*topc));
+        botc = av_calloc((iir->nb_ab[0] + 1) * 2, sizeof(*botc));
         if (!topc || !botc) {
             ret = AVERROR(ENOMEM);
             goto fail;
@@ -696,6 +683,39 @@ static void convert_pr2zp(AVFilterContext *ctx, int channels)
     }
 }
 
+static void convert_sp2zp(AVFilterContext *ctx, int channels)
+{
+    AudioIIRContext *s = ctx->priv;
+    int ch;
+
+    for (ch = 0; ch < channels; ch++) {
+        IIRChannel *iir = &s->iir[ch];
+        int n;
+
+        for (n = 0; n < iir->nb_ab[0]; n++) {
+            double sr = iir->ab[0][2*n];
+            double si = iir->ab[0][2*n+1];
+            double snr = 1. + sr;
+            double sdr = 1. - sr;
+            double div = sdr * sdr + si * si;
+
+            iir->ab[0][2*n]   = (snr * sdr - si * si) / div;
+            iir->ab[0][2*n+1] = (sdr * si + snr * si) / div;
+        }
+
+        for (n = 0; n < iir->nb_ab[1]; n++) {
+            double sr = iir->ab[1][2*n];
+            double si = iir->ab[1][2*n+1];
+            double snr = 1. + sr;
+            double sdr = 1. - sr;
+            double div = sdr * sdr + si * si;
+
+            iir->ab[1][2*n]   = (snr * sdr - si * si) / div;
+            iir->ab[1][2*n+1] = (sdr * si + snr * si) / div;
+        }
+    }
+}
+
 static void convert_pd2zp(AVFilterContext *ctx, int channels)
 {
     AudioIIRContext *s = ctx->priv;
@@ -791,9 +811,14 @@ static void draw_line(AVFrame *out, int x0, int y0, int x1, int y1, uint32_t col
     }
 }
 
+static double distance(double x0, double x1, double y0, double y1)
+{
+    return hypot(x0 - x1, y0 - y1);
+}
+
 static void get_response(int channel, int format, double w,
                          const double *b, const double *a,
-                         int nb_b, int nb_a, double *r, double *i)
+                         int nb_b, int nb_a, double *magnitude, double *phase)
 {
     double realz, realp;
     double imagz, imagp;
@@ -816,39 +841,26 @@ static void get_response(int channel, int format, double w,
         div = realp * realp + imagp * imagp;
         real = (realz * realp + imagz * imagp) / div;
         imag = (imagz * realp - imagp * realz) / div;
+
+        *magnitude = hypot(real, imag);
+        *phase = atan2(imag, real);
     } else {
-        real = 1;
-        imag = 0;
+        double p = 1., z = 1.;
+        double acc = 0.;
+
         for (int x = 0; x < nb_a; x++) {
-            double ore, oim, re, im;
-
-            re = cos(w) - a[2 * x];
-            im = sin(w) - a[2 * x + 1];
-
-            ore = real;
-            oim = imag;
-
-            real = ore * re - oim * im;
-            imag = ore * im + oim * re;
+            z *= distance(cos(w), a[2 * x], sin(w), a[2 * x + 1]);
+            acc += atan2(sin(w) - a[2 * x + 1], cos(w) - a[2 * x]);
         }
 
         for (int x = 0; x < nb_b; x++) {
-            double ore, oim, re, im;
-
-            re = cos(w) - b[2 * x];
-            im = sin(w) - b[2 * x + 1];
-
-            ore = real;
-            oim = imag;
-            div = re * re + im * im;
-
-            real = (ore * re + oim * im) / div;
-            imag = (oim * re - ore * im) / div;
+            p *= distance(cos(w), b[2 * x], sin(w), b[2 * x + 1]);
+            acc -= atan2(sin(w) - b[2 * x + 1], cos(w) - b[2 * x]);
         }
-    }
 
-    *r = real;
-    *i = imag;
+        *magnitude = z / p;
+        *phase = acc;
+    }
 }
 
 static void draw_response(AVFilterContext *ctx, AVFrame *out, int sample_rate)
@@ -876,12 +888,12 @@ static void draw_response(AVFilterContext *ctx, AVFrame *out, int sample_rate)
         const int nb_b = s->iir[ch].nb_ab[0];
         const int nb_a = s->iir[ch].nb_ab[1];
         double w = i * M_PI / (s->w - 1);
-        double real, imag;
+        double m, p;
 
-        get_response(ch, s->format, w, b, a, nb_b, nb_a, &real, &imag);
+        get_response(ch, s->format, w, b, a, nb_b, nb_a, &m, &p);
 
-        mag[i] = s->iir[ch].g * hypot(real, imag);
-        phase[i] = atan2(imag, real);
+        mag[i] = s->iir[ch].g * m;
+        phase[i] = p;
         min = fmin(min, mag[i]);
         max = fmax(max, mag[i]);
     }
@@ -996,9 +1008,20 @@ static int config_output(AVFilterLink *outlink)
         convert_pr2zp(ctx, inlink->channels);
     } else if (s->format == 3) {
         convert_pd2zp(ctx, inlink->channels);
+    } else if (s->format == 4) {
+        convert_sp2zp(ctx, inlink->channels);
     }
     if (s->format > 0) {
         check_stability(ctx, inlink->channels);
+    }
+
+    av_frame_free(&s->video);
+    if (s->response) {
+        s->video = ff_get_video_buffer(ctx->outputs[1], s->w, s->h);
+        if (!s->video)
+            return AVERROR(ENOMEM);
+
+        draw_response(ctx, s->video, inlink->sample_rate);
     }
 
     if (s->format == 0)
@@ -1042,15 +1065,6 @@ static int config_output(AVFilterLink *outlink)
     case AV_SAMPLE_FMT_FLTP: s->iir_channel = s->process == 1 ? iir_ch_serial_fltp : iir_ch_fltp; break;
     case AV_SAMPLE_FMT_S32P: s->iir_channel = s->process == 1 ? iir_ch_serial_s32p : iir_ch_s32p; break;
     case AV_SAMPLE_FMT_S16P: s->iir_channel = s->process == 1 ? iir_ch_serial_s16p : iir_ch_s16p; break;
-    }
-
-    av_frame_free(&s->video);
-    if (s->response) {
-        s->video = ff_get_video_buffer(ctx->outputs[1], s->w, s->h);
-        if (!s->video)
-            return AVERROR(ENOMEM);
-
-        draw_response(ctx, s->video, inlink->sample_rate);
     }
 
     return 0;
@@ -1153,6 +1167,10 @@ static av_cold int init(AVFilterContext *ctx)
     if (!pad.name)
         return AVERROR(ENOMEM);
 
+    ret = ff_insert_outpad(ctx, 0, &pad);
+    if (ret < 0)
+        return ret;
+
     if (s->response) {
         vpad = (AVFilterPad){
             .name         = av_strdup("filter_response"),
@@ -1161,13 +1179,7 @@ static av_cold int init(AVFilterContext *ctx)
         };
         if (!vpad.name)
             return AVERROR(ENOMEM);
-    }
 
-    ret = ff_insert_outpad(ctx, 0, &pad);
-    if (ret < 0)
-        return ret;
-
-    if (s->response) {
         ret = ff_insert_outpad(ctx, 1, &vpad);
         if (ret < 0)
             return ret;
@@ -1221,12 +1233,13 @@ static const AVOption aiir_options[] = {
     { "k", "set channels gains",                   OFFSET(g_str),    AV_OPT_TYPE_STRING, {.str="1|1"}, 0, 0, AF },
     { "dry", "set dry gain",                       OFFSET(dry_gain), AV_OPT_TYPE_DOUBLE, {.dbl=1},     0, 1, AF },
     { "wet", "set wet gain",                       OFFSET(wet_gain), AV_OPT_TYPE_DOUBLE, {.dbl=1},     0, 1, AF },
-    { "format", "set coefficients format",         OFFSET(format),   AV_OPT_TYPE_INT,    {.i64=1},     0, 3, AF, "format" },
-    { "f", "set coefficients format",              OFFSET(format),   AV_OPT_TYPE_INT,    {.i64=1},     0, 3, AF, "format" },
-    { "tf", "transfer function",                   0,                AV_OPT_TYPE_CONST,  {.i64=0},     0, 0, AF, "format" },
+    { "format", "set coefficients format",         OFFSET(format),   AV_OPT_TYPE_INT,    {.i64=1},     0, 4, AF, "format" },
+    { "f", "set coefficients format",              OFFSET(format),   AV_OPT_TYPE_INT,    {.i64=1},     0, 4, AF, "format" },
+    { "tf", "digital transfer function",           0,                AV_OPT_TYPE_CONST,  {.i64=0},     0, 0, AF, "format" },
     { "zp", "Z-plane zeros/poles",                 0,                AV_OPT_TYPE_CONST,  {.i64=1},     0, 0, AF, "format" },
     { "pr", "Z-plane zeros/poles (polar radians)", 0,                AV_OPT_TYPE_CONST,  {.i64=2},     0, 0, AF, "format" },
     { "pd", "Z-plane zeros/poles (polar degrees)", 0,                AV_OPT_TYPE_CONST,  {.i64=3},     0, 0, AF, "format" },
+    { "sp", "S-plane zeros/poles",                 0,                AV_OPT_TYPE_CONST,  {.i64=4},     0, 0, AF, "format" },
     { "process", "set kind of processing",         OFFSET(process),  AV_OPT_TYPE_INT,    {.i64=1},     0, 1, AF, "process" },
     { "r", "set kind of processing",               OFFSET(process),  AV_OPT_TYPE_INT,    {.i64=1},     0, 1, AF, "process" },
     { "d", "direct",                               0,                AV_OPT_TYPE_CONST,  {.i64=0},     0, 0, AF, "process" },
