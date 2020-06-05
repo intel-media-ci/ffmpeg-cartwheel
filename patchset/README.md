@@ -18,4 +18,4 @@ FFmpeg Unmerged Patches
     Note: CI server use 'patch -t' to apply patches
 
 
-Please contact zachary.zhou@intel.com if you have any questions.
+Please contact focus.luo@intel.com if you have any questions.
