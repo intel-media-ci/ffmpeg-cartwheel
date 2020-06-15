@@ -1,7 +1,7 @@
-From 80894058855894de05706b99a963c341d9c191bb Mon Sep 17 00:00:00 2001
+From 0a8752f67a6f290e4ee4202d7fb4f143b7c33413 Mon Sep 17 00:00:00 2001
 From: Linjie Fu <linjie.fu@intel.com>
-Date: Mon, 2 Dec 2019 13:50:46 +0800
-Subject: [PATCH 01/28] lavu/pixfmt: add new pixel format 0yuv/y410
+Date: Mon, 15 Jun 2020 10:58:19 +0800
+Subject: [PATCH] lavu/pixfmt: add new pixel format 0yuv/y410
 
 Previously, media driver provided planar format(like 420 8 bit),
 but for HEVC Range Extension (444 8/10 bit), the decoded image
@@ -13,7 +13,8 @@ and QSV:
 4:4:4  8 bit: 0YUV
 4:4:4 10 bit: Y410
 
-Add query support in fate and update the minor version.
+Add query support in fate. New version should be bumped while
+upstreaming.
 
 Signed-off-by: Linjie Fu <linjie.fu@intel.com>
 ---
@@ -23,7 +24,7 @@ Signed-off-by: Linjie Fu <linjie.fu@intel.com>
  3 files changed, 53 insertions(+)
 
 diff --git a/libavutil/pixdesc.c b/libavutil/pixdesc.c
-index 9d61c52..89075e6 100644
+index 8274713..584bf42 100644
 --- a/libavutil/pixdesc.c
 +++ b/libavutil/pixdesc.c
 @@ -228,6 +228,43 @@ static const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
@@ -71,7 +72,7 @@ index 9d61c52..89075e6 100644
          .name = "rgb24",
          .nb_components = 3,
 diff --git a/libavutil/pixfmt.h b/libavutil/pixfmt.h
-index 1c625cf..4264c45 100644
+index a46acf3..fe9d83e 100644
 --- a/libavutil/pixfmt.h
 +++ b/libavutil/pixfmt.h
 @@ -358,6 +358,10 @@ enum AVPixelFormat {
@@ -82,22 +83,22 @@ index 1c625cf..4264c45 100644
 +    AV_PIX_FMT_Y410LE,    ///< packed YUV 4:4:4, 32bpp, Cr  Y Cb  A, little-endian
 +    AV_PIX_FMT_Y410BE,    ///< packed YUV 4:4:4, 32bpp, Cr  Y Cb  A, big-endian
 +
+     AV_PIX_FMT_X2RGB10LE, ///< packed RGB 10:10:10, 30bpp, (msb)2X 10R 10G 10B(lsb), little-endian, X=unused/undefined
+     AV_PIX_FMT_X2RGB10BE, ///< packed RGB 10:10:10, 30bpp, (msb)2X 10R 10G 10B(lsb), big-endian, X=unused/undefined
      AV_PIX_FMT_NB         ///< number of pixel formats, DO NOT USE THIS if you want to link with shared libav* because the number of formats might differ between versions
- };
- 
-@@ -447,6 +451,7 @@ enum AVPixelFormat {
+@@ -449,6 +453,7 @@ enum AVPixelFormat {
  #define AV_PIX_FMT_P016       AV_PIX_FMT_NE(P016BE,  P016LE)
  
  #define AV_PIX_FMT_Y210       AV_PIX_FMT_NE(Y210BE,  Y210LE)
 +#define AV_PIX_FMT_Y410       AV_PIX_FMT_NE(Y410BE,  Y410LE)
+ #define AV_PIX_FMT_X2RGB10    AV_PIX_FMT_NE(X2RGB10BE, X2RGB10LE)
  
  /**
-   * Chromaticity coordinates of the source primaries.
 diff --git a/tests/ref/fate/sws-pixdesc-query b/tests/ref/fate/sws-pixdesc-query
-index bc9a0d8..d0efa92 100644
+index c3cccfa..f023430 100644
 --- a/tests/ref/fate/sws-pixdesc-query
 +++ b/tests/ref/fate/sws-pixdesc-query
-@@ -61,6 +61,8 @@ isNBPS:
+@@ -63,6 +63,8 @@ isNBPS:
    xyz12le
    y210be
    y210le
@@ -106,15 +107,15 @@ index bc9a0d8..d0efa92 100644
    yuv420p10be
    yuv420p10le
    yuv420p12be
-@@ -143,6 +145,7 @@ isBE:
-   rgba64be
+@@ -146,6 +148,7 @@ isBE:
+   x2rgb10be
    xyz12be
    y210be
 +  y410be
    ya16be
    yuv420p10be
    yuv420p12be
-@@ -174,6 +177,7 @@ isBE:
+@@ -177,6 +180,7 @@ isBE:
    yuva444p9be
  
  isYUV:
@@ -122,7 +123,7 @@ index bc9a0d8..d0efa92 100644
    ayuv64be
    ayuv64le
    nv12
-@@ -193,6 +197,8 @@ isYUV:
+@@ -196,6 +200,8 @@ isYUV:
    xyz12le
    y210be
    y210le
@@ -131,7 +132,7 @@ index bc9a0d8..d0efa92 100644
    ya16be
    ya16le
    ya8
-@@ -604,6 +610,8 @@ ALPHA:
+@@ -611,6 +617,8 @@ ALPHA:
    rgb32_1
    rgba64be
    rgba64le
@@ -140,7 +141,7 @@ index bc9a0d8..d0efa92 100644
    ya16be
    ya16le
    ya8
-@@ -636,6 +644,7 @@ ALPHA:
+@@ -643,6 +651,7 @@ ALPHA:
  Packed:
    0bgr
    0rgb
@@ -148,7 +149,7 @@ index bc9a0d8..d0efa92 100644
    ayuv64be
    ayuv64le
    bayer_bggr16be
-@@ -693,6 +702,8 @@ Packed:
+@@ -702,6 +711,8 @@ Packed:
    xyz12le
    y210be
    y210le
