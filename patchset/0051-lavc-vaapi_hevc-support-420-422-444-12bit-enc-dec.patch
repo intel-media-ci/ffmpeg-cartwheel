@@ -293,8 +293,8 @@ index 1af1ec7cd5..cb55937cb3 100644
 +    AV_PIX_FMT_Y412LE,    ///< packed YUV 4:4:4, 36bpp, Cr  Y Cb  A, little-endian
 +    AV_PIX_FMT_Y412BE,    ///< packed YUV 4:4:4, 36bpp, Cr  Y Cb  A, big-endian
 +
-     AV_PIX_FMT_X2RGB10LE,    ///< packed RGB 10:10:10, 30bpp, (msb)2X 10R 10G 10B(lsb), little-endian, X=unused/undefined
-     AV_PIX_FMT_X2RGB10BE,    ///< packed RGB 10:10:10, 30bpp, (msb)2X 10R 10G 10B(lsb), big-endian, X=unused/undefined
+     AV_PIX_FMT_X2RGB10LE, ///< packed RGB 10:10:10, 30bpp, (msb)2X 10R 10G 10B(lsb), little-endian, X=unused/undefined
+     AV_PIX_FMT_X2RGB10BE, ///< packed RGB 10:10:10, 30bpp, (msb)2X 10R 10G 10B(lsb), big-endian, X=unused/undefined
      AV_PIX_FMT_NB         ///< number of pixel formats, DO NOT USE THIS if you want to link with shared libav* because the number of formats might differ between versions
 @@ -450,10 +458,13 @@ enum AVPixelFormat {
  #define AV_PIX_FMT_NV20       AV_PIX_FMT_NE(NV20BE,  NV20LE)
@@ -307,7 +307,7 @@ index 1af1ec7cd5..cb55937cb3 100644
  #define AV_PIX_FMT_Y410       AV_PIX_FMT_NE(Y410BE,  Y410LE)
 +#define AV_PIX_FMT_Y212       AV_PIX_FMT_NE(Y212BE,  Y212LE)
 +#define AV_PIX_FMT_Y412       AV_PIX_FMT_NE(Y412BE,  Y412LE)
- #define AV_PIX_FMT_X2RGB10       AV_PIX_FMT_NE(X2RGB10BE, X2RGB10LE)
+ #define AV_PIX_FMT_X2RGB10    AV_PIX_FMT_NE(X2RGB10BE, X2RGB10LE)
  
  /**
 diff --git a/tests/ref/fate/sws-pixdesc-query b/tests/ref/fate/sws-pixdesc-query
