@@ -2342,7 +2342,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
                 uint32_t format = AV_RB32(st->codecpar->extradata + 22);
                 if (format == AV_RB32("name") && (int64_t)size >= (int64_t)len + 18) {
                     uint16_t str_size = AV_RB16(st->codecpar->extradata + 26); /* string length */
-                    if (str_size > 0 && size >= (int)str_size + 26) {
+                    if (str_size > 0 && size >= (int)str_size + 30) {
                         char *reel_name = av_malloc(str_size + 1);
                         if (!reel_name)
                             return AVERROR(ENOMEM);
@@ -4432,6 +4432,9 @@ static int mov_read_custom(MOVContext *c, AVIOContext *pb, MOVAtom atom)
             len -= 4;
             p = &val;
         } else
+            break;
+
+        if (*p)
             break;
 
         *p = av_malloc(len + 1);
@@ -7580,14 +7583,13 @@ static int mov_read_header(AVFormatContext *s)
             avio_seek(pb, 0, SEEK_SET);
         if ((err = mov_read_default(mov, pb, atom)) < 0) {
             av_log(s, AV_LOG_ERROR, "error reading header\n");
-            mov_read_close(s);
-            return err;
+            goto fail;
         }
     } while ((pb->seekable & AVIO_SEEKABLE_NORMAL) && !mov->found_moov && !mov->moov_retry++);
     if (!mov->found_moov) {
         av_log(s, AV_LOG_ERROR, "moov atom not found\n");
-        mov_read_close(s);
-        return AVERROR_INVALIDDATA;
+        err = AVERROR_INVALIDDATA;
+        goto fail;
     }
     av_log(mov->fc, AV_LOG_TRACE, "on_parse_exit_offset=%"PRId64"\n", avio_tell(pb));
 
@@ -7640,7 +7642,7 @@ static int mov_read_header(AVFormatContext *s)
             }
             if (st->codecpar->codec_id == AV_CODEC_ID_DVD_SUBTITLE) {
                 if ((err = mov_rewrite_dvd_sub_extradata(st)) < 0)
-                    return err;
+                    goto fail;
             }
         }
         if (mov->handbrake_version &&
@@ -7660,8 +7662,8 @@ static int mov_read_header(AVFormatContext *s)
                 if (sc->data_size > INT64_MAX / sc->time_scale / 8) {
                     av_log(s, AV_LOG_ERROR, "Overflow during bit rate calculation %"PRId64" * 8 * %d\n",
                            sc->data_size, sc->time_scale);
-                    mov_read_close(s);
-                    return AVERROR_INVALIDDATA;
+                    err = AVERROR_INVALIDDATA;
+                    goto fail;
                 }
                 st->codecpar->bit_rate = sc->data_size * 8 * sc->time_scale / st->duration;
             }
@@ -7676,8 +7678,8 @@ static int mov_read_header(AVFormatContext *s)
                 if (sc->data_size > INT64_MAX / sc->time_scale / 8) {
                     av_log(s, AV_LOG_ERROR, "Overflow during bit rate calculation %"PRId64" * 8 * %d\n",
                            sc->data_size, sc->time_scale);
-                    mov_read_close(s);
-                    return AVERROR_INVALIDDATA;
+                    err = AVERROR_INVALIDDATA;
+                    goto fail;
                 }
                 st->codecpar->bit_rate = sc->data_size * 8 * sc->time_scale /
                     sc->duration_for_fps;
@@ -7701,8 +7703,7 @@ static int mov_read_header(AVFormatContext *s)
         case AVMEDIA_TYPE_AUDIO:
             err = ff_replaygain_export(st, s->metadata);
             if (err < 0) {
-                mov_read_close(s);
-                return err;
+                goto fail;
             }
             break;
         case AVMEDIA_TYPE_VIDEO:
@@ -7710,7 +7711,7 @@ static int mov_read_header(AVFormatContext *s)
                 err = av_stream_add_side_data(st, AV_PKT_DATA_DISPLAYMATRIX, (uint8_t*)sc->display_matrix,
                                               sizeof(int32_t) * 9);
                 if (err < 0)
-                    return err;
+                    goto fail;
 
                 sc->display_matrix = NULL;
             }
@@ -7719,7 +7720,7 @@ static int mov_read_header(AVFormatContext *s)
                                               (uint8_t *)sc->stereo3d,
                                               sizeof(*sc->stereo3d));
                 if (err < 0)
-                    return err;
+                    goto fail;
 
                 sc->stereo3d = NULL;
             }
@@ -7728,7 +7729,7 @@ static int mov_read_header(AVFormatContext *s)
                                               (uint8_t *)sc->spherical,
                                               sc->spherical_size);
                 if (err < 0)
-                    return err;
+                    goto fail;
 
                 sc->spherical = NULL;
             }
@@ -7737,7 +7738,7 @@ static int mov_read_header(AVFormatContext *s)
                                               (uint8_t *)sc->mastering,
                                               sizeof(*sc->mastering));
                 if (err < 0)
-                    return err;
+                    goto fail;
 
                 sc->mastering = NULL;
             }
@@ -7746,7 +7747,7 @@ static int mov_read_header(AVFormatContext *s)
                                               (uint8_t *)sc->coll,
                                               sc->coll_size);
                 if (err < 0)
-                    return err;
+                    goto fail;
 
                 sc->coll = NULL;
             }
@@ -7760,6 +7761,9 @@ static int mov_read_header(AVFormatContext *s)
             mov->frag_index.item[i].headers_read = 1;
 
     return 0;
+fail:
+    mov_read_close(s);
+    return err;
 }
 
 static AVIndexEntry *mov_find_next_sample(AVFormatContext *s, AVStream **st)
@@ -7854,6 +7858,27 @@ static int mov_change_extradata(MOVStreamContext *sc, AVPacket *pkt)
     return 0;
 }
 
+static int get_eia608_packet(AVIOContext *pb, AVPacket *pkt, int size)
+{
+    int new_size, ret;
+
+    if (size <= 8)
+        return AVERROR_INVALIDDATA;
+    new_size = ((size - 8) / 2) * 3;
+    ret = av_new_packet(pkt, new_size);
+    if (ret < 0)
+        return ret;
+
+    avio_skip(pb, 8);
+    for (int j = 0; j < new_size; j += 3) {
+        pkt->data[j] = 0xFC;
+        pkt->data[j+1] = avio_r8(pb);
+        pkt->data[j+2] = avio_r8(pb);
+    }
+
+    return 0;
+}
+
 static int mov_read_packet(AVFormatContext *s, AVPacket *pkt)
 {
     MOVContext *mov = s->priv_data;
@@ -7898,6 +7923,9 @@ static int mov_read_packet(AVFormatContext *s, AVPacket *pkt)
             goto retry;
         }
 
+        if (st->codecpar->codec_id == AV_CODEC_ID_EIA_608 && sample->size > 8)
+            ret = get_eia608_packet(sc->pb, pkt, sample->size);
+        else
         ret = av_get_packet(sc->pb, pkt, sample->size);
         if (ret < 0) {
             if (should_retry(sc->pb, ret)) {

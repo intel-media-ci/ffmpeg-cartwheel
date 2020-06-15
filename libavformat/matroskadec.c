@@ -2938,9 +2938,8 @@ static int matroska_read_header(AVFormatContext *s)
                 st->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
 
                 av_init_packet(pkt);
-                pkt->buf = av_buffer_ref(attachments[j].bin.buf);
-                if (!pkt->buf)
-                    return AVERROR(ENOMEM);
+                pkt->buf          = attachments[j].bin.buf;
+                attachments[j].bin.buf = NULL;
                 pkt->data         = attachments[j].bin.data;
                 pkt->size         = attachments[j].bin.size;
                 pkt->stream_index = st->index;
@@ -3569,7 +3568,8 @@ static int matroska_parse_block(MatroskaDemuxContext *matroska, AVBufferRef *buf
 
     if (st->discard >= AVDISCARD_ALL)
         return res;
-    av_assert1(block_duration != AV_NOPTS_VALUE);
+    if (block_duration > INT64_MAX)
+        block_duration = INT64_MAX;
 
     block_time = sign_extend(AV_RB16(data), 16);
     data      += 2;
@@ -4180,15 +4180,18 @@ static int webm_dash_manifest_read_header(AVFormatContext *s)
         av_log(s, AV_LOG_ERROR, "Failed to read file headers\n");
         return -1;
     }
-    if (!s->nb_streams) {
-        matroska_read_close(s);
-        av_log(s, AV_LOG_ERROR, "No streams found\n");
-        return AVERROR_INVALIDDATA;
+    if (!matroska->tracks.nb_elem || !s->nb_streams) {
+        av_log(s, AV_LOG_ERROR, "No track found\n");
+        ret = AVERROR_INVALIDDATA;
+        goto fail;
     }
 
     if (!matroska->is_live) {
         buf = av_asprintf("%g", matroska->duration);
-        if (!buf) return AVERROR(ENOMEM);
+        if (!buf) {
+            ret = AVERROR(ENOMEM);
+            goto fail;
+        }
         av_dict_set(&s->streams[0]->metadata, DURATION,
                     buf, AV_DICT_DONT_STRDUP_VAL);
 
@@ -4211,7 +4214,7 @@ static int webm_dash_manifest_read_header(AVFormatContext *s)
         ret = webm_dash_manifest_cues(s, init_range);
         if (ret < 0) {
             av_log(s, AV_LOG_ERROR, "Error parsing Cues\n");
-            return ret;
+            goto fail;
         }
     }
 
@@ -4221,6 +4224,9 @@ static int webm_dash_manifest_read_header(AVFormatContext *s)
                         matroska->bandwidth, 0);
     }
     return 0;
+fail:
+    matroska_read_close(s);
+    return ret;
 }
 
 static int webm_dash_manifest_read_packet(AVFormatContext *s, AVPacket *pkt)

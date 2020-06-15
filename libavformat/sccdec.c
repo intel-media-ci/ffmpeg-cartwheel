@@ -131,35 +131,36 @@ try_again:
             o2 = convert(c4) | (convert(c3) << 4);
 
             lline = NULL;
-            out[i+0] = 0xfc;
-            out[i+1] = o1;
-            out[i+2] = o2;
 
-            if (o1 == 0x94 && o2 == 0x2f && saveptr && av_strcasecmp(saveptr, "942f")) {
+            if (i > 12 && o1 == 0x94 && o2 == 0x20 && saveptr &&
+                (av_strncasecmp(saveptr, "942f", 4) || !av_strncasecmp(saveptr, "942c", 4))) {
                 int64_t duration;
 
-                i += 3;
                 out[i] = 0;
                 duration = i * 11;
 
                 sub = ff_subtitles_queue_insert(&scc->q, out, i, 0);
                 if (!sub)
-                    return AVERROR(ENOMEM);
+                    goto fail;
 
-                current_pos += i;
                 sub->pos = current_pos;
+                current_pos += i;
                 sub->pts = ts_start;
                 sub->duration = duration;
                 ts_start += duration;
                 i = 0;
             }
+
+            out[i+0] = 0xfc;
+            out[i+1] = o1;
+            out[i+2] = o2;
         }
 
         out[i] = 0;
 
         sub = ff_subtitles_queue_insert(&scc->q, out, i, 0);
         if (!sub)
-            return AVERROR(ENOMEM);
+            goto fail;
 
         sub->pos = current_pos;
         sub->pts = ts_start;
@@ -178,6 +179,9 @@ try_again:
     ff_subtitles_queue_finalize(s, &scc->q);
 
     return ret;
+fail:
+    ff_subtitles_queue_clean(&scc->q);
+    return AVERROR(ENOMEM);
 }
 
 static int scc_read_packet(AVFormatContext *s, AVPacket *pkt)
