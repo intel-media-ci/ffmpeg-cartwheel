@@ -242,9 +242,6 @@ typedef struct CCaptionSubContext {
     int screen_touched;
     int64_t last_real_time;
     char prev_cmd[2];
-    /* buffer to store pkt data */
-    uint8_t *pktbuf;
-    int pktbuf_size;
     int readorder;
 } CCaptionSubContext;
 
@@ -279,8 +276,6 @@ static av_cold int close_decoder(AVCodecContext *avctx)
 {
     CCaptionSubContext *ctx = avctx->priv_data;
     av_bprint_finalize(&ctx->buffer, NULL);
-    av_freep(&ctx->pktbuf);
-    ctx->pktbuf_size = 0;
     return 0;
 }
 
@@ -635,7 +630,7 @@ static int handle_eoc(CCaptionSubContext *ctx, int64_t pts)
     // In buffered mode, we wait til the *next* EOC and
     // reap what was already on the screen since the last EOC.
     if (!ctx->real_time)
-        ret = handle_edm(ctx,pts);
+        ret = handle_edm(ctx, pts);
 
     ctx->cursor_column = 0;
 
@@ -653,7 +648,7 @@ static void handle_delete_end_of_row(CCaptionSubContext *ctx)
     write_char(ctx, screen, 0);
 }
 
-static void handle_char(CCaptionSubContext *ctx, char hi, char lo, int64_t pts)
+static void handle_char(CCaptionSubContext *ctx, char hi, char lo)
 {
     struct Screen *screen = get_writing_screen(ctx);
 
@@ -766,16 +761,16 @@ static int process_cc608(CCaptionSubContext *ctx, int64_t pts, uint8_t hi, uint8
         }
     } else if (hi >= 0x11 && hi <= 0x13) {
         /* Special characters */
-        handle_char(ctx, hi, lo, pts);
+        handle_char(ctx, hi, lo);
     } else if (hi >= 0x20) {
         /* Standard characters (always in pairs) */
-        handle_char(ctx, hi, lo, pts);
+        handle_char(ctx, hi, lo);
         ctx->prev_cmd[0] = ctx->prev_cmd[1] = 0;
     } else if (hi == 0x17 && lo >= 0x21 && lo <= 0x23) {
         int i;
         /* Tab offsets (spacing) */
         for (i = 0; i < lo - 0x20; i++) {
-            handle_char(ctx, ' ', 0, pts);
+            handle_char(ctx, ' ', 0);
         }
     } else {
         /* Ignoring all other non data code */
@@ -795,20 +790,14 @@ static int decode(AVCodecContext *avctx, void *data, int *got_sub, AVPacket *avp
     int ret = 0;
     int i;
 
-    av_fast_padded_malloc(&ctx->pktbuf, &ctx->pktbuf_size, len);
-    if (!ctx->pktbuf) {
-        av_log(ctx, AV_LOG_WARNING, "Insufficient Memory of %d truncated to %d\n", len, ctx->pktbuf_size);
-        return AVERROR(ENOMEM);
-    }
-    memcpy(ctx->pktbuf, avpkt->data, len);
-    bptr = ctx->pktbuf;
+    bptr = avpkt->data;
 
-    for (i  = 0; i < len; i += 3) {
+    for (i = 0; i < len; i += 3) {
         uint8_t cc_type = *(bptr + i) & 3;
         if (validate_cc_data_pair(bptr + i))
             continue;
         /* ignoring data field 1 */
-        if(cc_type == 1)
+        if (cc_type == 1)
             continue;
         else
             ret = process_cc608(ctx, start_time, *(bptr + i + 1) & 0x7f, *(bptr + i + 2) & 0x7f);
@@ -820,9 +809,8 @@ static int decode(AVCodecContext *avctx, void *data, int *got_sub, AVPacket *avp
             continue;
         ctx->buffer_changed = 0;
 
-        if (*ctx->buffer.str || ctx->real_time)
-        {
-            ff_dlog(ctx, "cdp writing data (%s)\n",ctx->buffer.str);
+        if (ctx->buffer.str[0] || ctx->real_time) {
+            ff_dlog(ctx, "cdp writing data (%s)\n", ctx->buffer.str);
             ret = ff_ass_add_rect(sub, ctx->buffer.str, ctx->readorder++, 0, NULL, NULL);
             if (ret < 0)
                 return ret;
