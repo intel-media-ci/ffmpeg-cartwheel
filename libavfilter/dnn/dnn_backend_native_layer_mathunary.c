@@ -67,6 +67,8 @@ int dnn_execute_layer_math_unary(DnnOperand *operands, const int32_t *input_oper
 
     output->data_type = input->data_type;
     output->length = calculate_operand_data_length(output);
+    if (output->length <= 0)
+        return DNN_ERROR;
     output->data = av_realloc(output->data, output->length);
     if (!output->data)
         return DNN_ERROR;
@@ -103,6 +105,30 @@ int dnn_execute_layer_math_unary(DnnOperand *operands, const int32_t *input_oper
     case DMUO_ATAN:
         for (int i = 0; i < dims_count; ++i)
             dst[i] = atan(src[i]);
+        return 0;
+    case DMUO_SINH:
+        for (int i = 0; i < dims_count; ++i)
+            dst[i] = sinh(src[i]);
+        return 0;
+    case DMUO_COSH:
+        for (int i = 0; i < dims_count; ++i)
+            dst[i] = cosh(src[i]);
+        return 0;
+    case DMUO_TANH:
+        for (int i = 0; i < dims_count; ++i)
+            dst[i] = tanh(src[i]);
+        return 0;
+    case DMUO_ASINH:
+        for (int i = 0; i < dims_count; ++i)
+            dst[i] = asinh(src[i]);
+        return 0;
+    case DMUO_ACOSH:
+        for (int i = 0; i < dims_count; ++i)
+            dst[i] = acosh(src[i]);
+        return 0;
+    case DMUO_ATANH:
+        for (int i = 0; i < dims_count; ++i)
+            dst[i] = atanh(src[i]);
         return 0;
     default:
         return -1;
