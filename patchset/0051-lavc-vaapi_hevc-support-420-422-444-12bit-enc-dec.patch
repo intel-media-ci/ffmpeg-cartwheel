@@ -1,59 +1,38 @@
-From a342a499e00b98a112a028a5adf466610b61c703 Mon Sep 17 00:00:00 2001
+From 0c2e3f35ed06211f7af55658ffe32ee96a1bffa7 Mon Sep 17 00:00:00 2001
 From: Fei Wang <fei.w.wang@intel.com>
-Date: Thu, 30 Apr 2020 09:43:55 +0800
-Subject: [PATCH 1/2] lavc/vaapi_hevc: support 420/422/444 12bit enc/dec.
+Date: Tue, 14 Jul 2020 10:21:55 +0800
+Subject: [PATCH] lavc/vaapi_hevc: support 420/422/444 12bit enc/dec
 
-420 12bit enc:
-ffmpeg -hwaccel vaapi -vaapi_device /dev/dri/renderD128 -v verbose -f rawvideo -s:v 1920x1080 -pix_fmt p012le -i 1920x1080_2f.p010 -vf format=p012,hwupload -c:v hevc_vaapi -profile:v rext -g 30 -qp 28 -low_delay_b 1  -bf 4 -y test.h265
-
-420 12bit dec:
-ffmpeg -hwaccel vaapi -hwaccel_device /dev/dri/renderD128 -v verbose -i TSCTX_12bit_I_RExt_SHARP_1.bin -vsync passthrough -f md5 -y vaapi_out.md5
-
-422 12bit dec:
-ffmpeg -hwaccel vaapi -hwaccel_device /dev/dri/renderD128 -v debug -i GENERAL_12b_422_RExt_Sony_1.bit -vsync passthrough -y test.yuv
-
-444 12bit dec:
-ffmpeg -hwaccel vaapi -hwaccel_device /dev/dri/renderD128 -v debug -i GENERAL_12b_444_RExt_Sony_2.bit -vsync passthrough -y ffmpeg.vaapi.yuv
 ---
- libavcodec/hevcdec.c             | 12 ++++++
- libavcodec/vaapi_decode.c        | 17 ++++++++
+ libavcodec/hevcdec.c             |  5 +++
+ libavcodec/vaapi_decode.c        | 17 ++++++++++
  libavcodec/vaapi_encode.c        |  5 +++
- libavcodec/vaapi_encode_h265.c   |  6 +++
- libavcodec/vaapi_hevc.c          |  9 ++++
- libavutil/hwcontext_vaapi.c      | 10 +++++
- libavutil/pixdesc.c              | 73 ++++++++++++++++++++++++++++++++
- libavutil/pixfmt.h               | 11 +++++
- tests/ref/fate/sws-pixdesc-query | 27 ++++++++++++
- 9 files changed, 170 insertions(+)
+ libavcodec/vaapi_encode_h265.c   |  6 ++++
+ libavcodec/vaapi_hevc.c          |  9 +++++
+ libavutil/hwcontext_vaapi.c      | 10 ++++++
+ libavutil/pixdesc.c              | 73 ++++++++++++++++++++++++++++++++++++++++
+ libavutil/pixfmt.h               | 11 ++++++
+ tests/ref/fate/sws-pixdesc-query | 27 +++++++++++++++
+ 9 files changed, 163 insertions(+)
 
 diff --git a/libavcodec/hevcdec.c b/libavcodec/hevcdec.c
-index 69481a66ea..972f134c50 100644
+index 71ef8c9..8920229 100644
 --- a/libavcodec/hevcdec.c
 +++ b/libavcodec/hevcdec.c
-@@ -444,9 +444,21 @@ static enum AVPixelFormat get_format(HEVCContext *s, const HEVCSPS *sps)
+@@ -448,6 +448,11 @@ static enum AVPixelFormat get_format(HEVCContext *s, const HEVCSPS *sps)
+         *fmt++ = AV_PIX_FMT_VAAPI;
  #endif
          break;
-     case AV_PIX_FMT_YUV420P12:
-+#if CONFIG_HEVC_VAAPI_HWACCEL
-+        *fmt++ = AV_PIX_FMT_VAAPI;
-+#endif
-+        break;
 +    case AV_PIX_FMT_YUV422P12LE:
 +#if CONFIG_HEVC_VAAPI_HWACCEL
 +        *fmt++ = AV_PIX_FMT_VAAPI;
 +#endif
-+    break;
++        break;
+     case AV_PIX_FMT_YUV420P12:
+     case AV_PIX_FMT_YUV444P10:
      case AV_PIX_FMT_YUV444P12:
- #if CONFIG_HEVC_NVDEC_HWACCEL
-         *fmt++ = AV_PIX_FMT_CUDA;
-+#endif
-+#if CONFIG_HEVC_VAAPI_HWACCEL
-+        *fmt++ = AV_PIX_FMT_VAAPI;
- #endif
-         break;
-     }
 diff --git a/libavcodec/vaapi_decode.c b/libavcodec/vaapi_decode.c
-index f3147242ef..ace515b907 100644
+index f314724..ace515b 100644
 --- a/libavcodec/vaapi_decode.c
 +++ b/libavcodec/vaapi_decode.c
 @@ -274,6 +274,15 @@ static const struct {
@@ -95,10 +74,10 @@ index f3147242ef..ace515b907 100644
                                                  source_format, 0, NULL);
          if (format == best_format)
 diff --git a/libavcodec/vaapi_encode.c b/libavcodec/vaapi_encode.c
-index 7b644fa566..dc4163b903 100644
+index 61b96da..9dc6edc 100644
 --- a/libavcodec/vaapi_encode.c
 +++ b/libavcodec/vaapi_encode.c
-@@ -1250,6 +1250,11 @@ static const VAAPIEncodeRTFormat vaapi_encode_rt_formats[] = {
+@@ -1262,6 +1262,11 @@ static const VAAPIEncodeRTFormat vaapi_encode_rt_formats[] = {
  #if VA_CHECK_VERSION(0, 38, 1)
      { "YUV420_10", VA_RT_FORMAT_YUV420_10BPP, 10, 3, 1, 1 },
  #endif
@@ -111,10 +90,10 @@ index 7b644fa566..dc4163b903 100644
  
  static const VAEntrypoint vaapi_encode_entrypoints_normal[] = {
 diff --git a/libavcodec/vaapi_encode_h265.c b/libavcodec/vaapi_encode_h265.c
-index af70642639..05568315c2 100644
+index 57afdac..a48f986 100644
 --- a/libavcodec/vaapi_encode_h265.c
 +++ b/libavcodec/vaapi_encode_h265.c
-@@ -1162,6 +1162,12 @@ static const VAAPIEncodeProfile vaapi_encode_h265_profiles[] = {
+@@ -1161,6 +1161,12 @@ static const VAAPIEncodeProfile vaapi_encode_h265_profiles[] = {
      { FF_PROFILE_HEVC_MAIN_10, 10, 3, 1, 1, VAProfileHEVCMain10     },
      { FF_PROFILE_HEVC_REXT,    10, 3, 1, 1, VAProfileHEVCMain10     },
  #endif
@@ -128,7 +107,7 @@ index af70642639..05568315c2 100644
  };
  
 diff --git a/libavcodec/vaapi_hevc.c b/libavcodec/vaapi_hevc.c
-index 027612dc99..7d68861c1e 100644
+index 027612d..7d68861 100644
 --- a/libavcodec/vaapi_hevc.c
 +++ b/libavcodec/vaapi_hevc.c
 @@ -569,6 +569,15 @@ VAProfile ff_vaapi_parse_hevc_rext_profile(AVCodecContext *avctx)
@@ -148,7 +127,7 @@ index 027612dc99..7d68861c1e 100644
      av_log(avctx, AV_LOG_WARNING, "HEVC profile %s is "
             "not supported with this VA version.\n", profile->name);
 diff --git a/libavutil/hwcontext_vaapi.c b/libavutil/hwcontext_vaapi.c
-index a1491df697..c8e8352992 100644
+index a1491df..c8e8352 100644
 --- a/libavutil/hwcontext_vaapi.c
 +++ b/libavutil/hwcontext_vaapi.c
 @@ -130,6 +130,16 @@ static const VAAPIFormatDescriptor vaapi_format_map[] = {
@@ -169,7 +148,7 @@ index a1491df697..c8e8352992 100644
      MAP(BGRX, RGB32,   BGR0, 0),
      MAP(RGBA, RGB32,   RGBA, 0),
 diff --git a/libavutil/pixdesc.c b/libavutil/pixdesc.c
-index e7d42654b4..172046ea4d 100644
+index 584bf42..82df9f0 100644
 --- a/libavutil/pixdesc.c
 +++ b/libavutil/pixdesc.c
 @@ -228,6 +228,29 @@ static const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
@@ -267,7 +246,7 @@ index e7d42654b4..172046ea4d 100644
          .name = "p016le",
          .nb_components = 3,
 diff --git a/libavutil/pixfmt.h b/libavutil/pixfmt.h
-index 1af1ec7cd5..cb55937cb3 100644
+index fe9d83e..2255435 100644
 --- a/libavutil/pixfmt.h
 +++ b/libavutil/pixfmt.h
 @@ -297,6 +297,8 @@ enum AVPixelFormat {
@@ -311,7 +290,7 @@ index 1af1ec7cd5..cb55937cb3 100644
  
  /**
 diff --git a/tests/ref/fate/sws-pixdesc-query b/tests/ref/fate/sws-pixdesc-query
-index f023430356..50d134ef32 100644
+index f023430..50d134e 100644
 --- a/tests/ref/fate/sws-pixdesc-query
 +++ b/tests/ref/fate/sws-pixdesc-query
 @@ -57,14 +57,20 @@ isNBPS:
@@ -425,5 +404,5 @@ index f023430356..50d134ef32 100644
    p016le
    yuv410p
 -- 
-2.17.1
+2.7.4
 
