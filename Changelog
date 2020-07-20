@@ -7,7 +7,7 @@ version <next>:
 - PGX decoder
 - chromanr video filter
 - VDPAU accelerated HEVC 10/12bit decoding
-
+- Intel QSV-accelerated AV1 decoding
 
 version 4.3:
 - v360 filter
