@@ -102,6 +102,7 @@ typedef struct Jpeg2000DecoderContext {
     uint8_t         cbps[4];    // bits per sample in particular components
     uint8_t         sgnd[4];    // if a component is signed
     uint8_t         properties[4];
+    uint8_t         in_tile_headers;
     int             cdx[4], cdy[4];
     int             precision;
     int             ncomponents;
@@ -1753,9 +1754,13 @@ static int decode_cblk(Jpeg2000DecoderContext *s, Jpeg2000CodingStyle *codsty,
         pass_cnt ++;
     }
 
-    if (cblk->data + cblk->length - 2*(term_cnt < cblk->nb_terminations) != t1->mqc.bp) {
+    if (cblk->data + cblk->length - 2 > t1->mqc.bp) {
         av_log(s->avctx, AV_LOG_WARNING, "End mismatch %"PTRDIFF_SPECIFIER"\n",
-               cblk->data + cblk->length - 2*(term_cnt < cblk->nb_terminations) - t1->mqc.bp);
+               cblk->data + cblk->length - 2 - t1->mqc.bp);
+    }
+
+    if (cblk->data + cblk->length < t1->mqc.bp) {
+        av_log(s->avctx, AV_LOG_WARNING, "Synthetic End of Stream Marker Read.\n");
     }
 
     return 1;
@@ -2092,7 +2097,8 @@ static int jpeg2000_read_main_headers(Jpeg2000DecoderContext *s)
 
         marker = bytestream2_get_be16u(&s->g);
         oldpos = bytestream2_tell(&s->g);
-
+        if (marker >= 0xFF30 && marker <= 0xFF3F)
+            continue;
         if (marker == JPEG2000_SOD) {
             Jpeg2000Tile *tile;
             Jpeg2000TilePart *tp;
@@ -2164,6 +2170,9 @@ static int jpeg2000_read_main_headers(Jpeg2000DecoderContext *s)
             ret = get_poc(s, len, poc);
             break;
         case JPEG2000_SOT:
+            if (!s->in_tile_headers) {
+                s->in_tile_headers = 1;
+            }
             if (!(ret = get_sot(s, len))) {
                 av_assert1(s->curtileno >= 0);
                 codsty = s->tile[s->curtileno].codsty;
