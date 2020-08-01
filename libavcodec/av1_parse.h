@@ -99,10 +99,10 @@ static inline int64_t leb128(GetBitContext *gb) {
 
 static inline int parse_obu_header(const uint8_t *buf, int buf_size,
                                    int64_t *obu_size, int *start_pos, int *type,
-                                   int *temporal_id, int *spatial_id)
+                                   int *temporal_id, int *spatial_id, int *has_size_flag)
 {
     GetBitContext gb;
-    int ret, extension_flag, has_size_flag;
+    int ret, extension_flag;
     int64_t size;
 
     ret = init_get_bits8(&gb, buf, FFMIN(buf_size, 2 + 8)); // OBU header fields + max leb128 length
@@ -114,7 +114,7 @@ static inline int parse_obu_header(const uint8_t *buf, int buf_size,
 
     *type      = get_bits(&gb, 4);
     extension_flag = get_bits1(&gb);
-    has_size_flag  = get_bits1(&gb);
+    *has_size_flag  = get_bits1(&gb);
     skip_bits1(&gb); // obu_reserved_1bit
 
     if (extension_flag) {
@@ -125,7 +125,7 @@ static inline int parse_obu_header(const uint8_t *buf, int buf_size,
         *temporal_id = *spatial_id = 0;
     }
 
-    *obu_size  = has_size_flag ? leb128(&gb)
+    *obu_size  = *has_size_flag ? leb128(&gb)
                                : buf_size - 1 - extension_flag;
 
     if (get_bits_left(&gb) < 0)

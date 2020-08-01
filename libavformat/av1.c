@@ -34,7 +34,7 @@ static int av1_filter_obus(AVIOContext *pb, const uint8_t *buf,
 {
     const uint8_t *start = buf, *end = buf + size;
     int64_t obu_size;
-    int off, start_pos, type, temporal_id, spatial_id;
+    int off, start_pos, type, temporal_id, spatial_id, has_size_flag;
     enum {
         START_NOT_FOUND,
         START_FOUND,
@@ -45,7 +45,7 @@ static int av1_filter_obus(AVIOContext *pb, const uint8_t *buf,
     off = size = 0;
     while (buf < end) {
         int len = parse_obu_header(buf, end - buf, &obu_size, &start_pos,
-                                   &type, &temporal_id, &spatial_id);
+                                   &type, &temporal_id, &spatial_id, &has_size_flag);
         if (len < 0)
             return len;
 
@@ -334,14 +334,14 @@ static int parse_sequence_header(AV1SequenceParameters *seq_params, const uint8_
 int ff_av1_parse_seq_header(AV1SequenceParameters *seq, const uint8_t *buf, int size)
 {
     int64_t obu_size;
-    int start_pos, type, temporal_id, spatial_id;
+    int start_pos, type, temporal_id, spatial_id, has_size_flag;
 
     if (size <= 0)
         return AVERROR_INVALIDDATA;
 
     while (size > 0) {
         int len = parse_obu_header(buf, size, &obu_size, &start_pos,
-                                   &type, &temporal_id, &spatial_id);
+                                   &type, &temporal_id, &spatial_id, &has_size_flag);
         if (len < 0)
             return len;
 
@@ -369,7 +369,7 @@ int ff_isom_write_av1c(AVIOContext *pb, const uint8_t *buf, int size)
     uint8_t header[4], *meta;
     const uint8_t *seq;
     int64_t obu_size;
-    int start_pos, type, temporal_id, spatial_id;
+    int start_pos, type, temporal_id, spatial_id, has_size_flag;
     int ret, nb_seq = 0, seq_size, meta_size;
 
     if (size <= 0)
@@ -381,7 +381,7 @@ int ff_isom_write_av1c(AVIOContext *pb, const uint8_t *buf, int size)
 
     while (size > 0) {
         int len = parse_obu_header(buf, size, &obu_size, &start_pos,
-                                   &type, &temporal_id, &spatial_id);
+                                   &type, &temporal_id, &spatial_id, &has_size_flag);
         if (len < 0) {
             ret = len;
             goto fail;

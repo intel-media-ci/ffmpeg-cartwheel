@@ -29,11 +29,11 @@
 int ff_av1_extract_obu(AV1OBU *obu, const uint8_t *buf, int length, void *logctx)
 {
     int64_t obu_size;
-    int start_pos, type, temporal_id, spatial_id;
+    int start_pos, type, temporal_id, spatial_id, has_size_flag;
     int len;
 
     len = parse_obu_header(buf, length, &obu_size, &start_pos,
-                           &type, &temporal_id, &spatial_id);
+                           &type, &temporal_id, &spatial_id, &has_size_flag);
     if (len < 0)
         return len;
 
