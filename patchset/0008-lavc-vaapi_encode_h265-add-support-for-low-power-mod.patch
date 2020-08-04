@@ -1,8 +1,8 @@
-From c109211afd1b66051217e2ecd8eac21c93a83f8c Mon Sep 17 00:00:00 2001
+From aaf2a3c7147ae85f0c887e0a1ba4a66d3586de87 Mon Sep 17 00:00:00 2001
 From: Linjie Fu <linjie.fu@intel.com>
 Date: Tue, 3 Dec 2019 16:07:48 +0800
-Subject: [PATCH 08/28] lavc/vaapi_encode_h265: add support for low power mode
- for HEVC encode
+Subject: [PATCH] lavc/vaapi_encode_h265: add support for low power mode for
+ HEVC encode
 
 Enable hevc_vaapi vdenc:
     - media-driver require CTU size must be set as 64x64 at low power mode
@@ -17,10 +17,10 @@ Signed-off-by: Linjie Fu <linjie.fu@intel.com>
  1 file changed, 28 insertions(+), 6 deletions(-)
 
 diff --git a/libavcodec/vaapi_encode_h265.c b/libavcodec/vaapi_encode_h265.c
-index 538862a..783837e 100644
+index 316030914c..a9b5a8c8d5 100644
 --- a/libavcodec/vaapi_encode_h265.c
 +++ b/libavcodec/vaapi_encode_h265.c
-@@ -437,9 +437,12 @@ static int vaapi_encode_h265_init_sequence_params(AVCodecContext *avctx)
+@@ -436,9 +436,12 @@ static int vaapi_encode_h265_init_sequence_params(AVCodecContext *avctx)
      // These have to come from the capabilities of the encoder.  We have no
      // way to query them, so just hardcode parameters which work on the Intel
      // driver.
@@ -35,7 +35,7 @@ index 538862a..783837e 100644
      // Transform size from 4x4 to 32x32.
      sps->log2_min_luma_transform_block_size_minus2   = 0;
      sps->log2_diff_max_min_luma_transform_block_size = 3;
-@@ -553,8 +556,10 @@ static int vaapi_encode_h265_init_sequence_params(AVCodecContext *avctx)
+@@ -552,8 +555,10 @@ static int vaapi_encode_h265_init_sequence_params(AVCodecContext *avctx)
  
      pps->init_qp_minus26 = priv->fixed_qp_idr - 26;
  
@@ -46,9 +46,9 @@ index 538862a..783837e 100644
 +    pps->diff_cu_qp_delta_depth   = pps->cu_qp_delta_enabled_flag && ctx->low_power ?
 +                                        sps->log2_diff_max_min_luma_coding_block_size : 0;
  
-     pps->pps_loop_filter_across_slices_enabled_flag = 1;
- 
-@@ -873,6 +878,7 @@ static int vaapi_encode_h265_init_slice_params(AVCodecContext *avctx,
+     if (ctx->tile_rows && ctx->tile_cols) {
+         int uniform_spacing;
+@@ -912,6 +917,7 @@ static int vaapi_encode_h265_init_slice_params(AVCodecContext *avctx,
                                                 VAAPIEncodeSlice *slice)
  {
      VAAPIEncodeH265Context           *priv = avctx->priv_data;
@@ -56,7 +56,7 @@ index 538862a..783837e 100644
      VAAPIEncodeH265Picture           *hpic = pic->priv_data;
      const H265RawSPS                  *sps = &priv->raw_sps;
      const H265RawPPS                  *pps = &priv->raw_pps;
-@@ -893,6 +899,9 @@ static int vaapi_encode_h265_init_slice_params(AVCodecContext *avctx,
+@@ -932,6 +938,9 @@ static int vaapi_encode_h265_init_slice_params(AVCodecContext *avctx,
      sh->slice_segment_address           = slice->block_start;
  
      sh->slice_type = hpic->slice_type;
@@ -66,7 +66,7 @@ index 538862a..783837e 100644
  
      sh->slice_pic_order_cnt_lsb = hpic->pic_order_cnt &
          (1 << (sps->log2_max_pic_order_cnt_lsb_minus4 + 4)) - 1;
-@@ -1059,6 +1068,16 @@ static int vaapi_encode_h265_init_slice_params(AVCodecContext *avctx,
+@@ -1098,6 +1107,16 @@ static int vaapi_encode_h265_init_slice_params(AVCodecContext *avctx,
          vslice->ref_pic_list1[0] = vpic->reference_frames[1];
      }
  
@@ -83,7 +83,7 @@ index 538862a..783837e 100644
      return 0;
  }
  
-@@ -1175,8 +1194,11 @@ static av_cold int vaapi_encode_h265_init(AVCodecContext *avctx)
+@@ -1218,8 +1237,11 @@ static av_cold int vaapi_encode_h265_init(AVCodecContext *avctx)
      ctx->surface_width  = FFALIGN(avctx->width,  16);
      ctx->surface_height = FFALIGN(avctx->height, 16);
  
@@ -98,5 +98,5 @@ index 538862a..783837e 100644
      if (priv->qp > 0)
          ctx->explicit_qp = priv->qp;
 -- 
-2.7.4
+2.17.1
 
