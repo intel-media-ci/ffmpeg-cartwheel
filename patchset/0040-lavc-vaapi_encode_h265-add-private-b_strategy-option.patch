@@ -1,4 +1,4 @@
-From 2394fbd4885258c82cb82fae1fbde3083882982c Mon Sep 17 00:00:00 2001
+From 10f4a01f6312cf97cc2e6023a511539964c76c77 Mon Sep 17 00:00:00 2001
 From: Linjie Fu <linjie.fu@intel.com>
 Date: Tue, 7 Apr 2020 14:03:21 +0800
 Subject: [PATCH] lavc/vaapi_encode_h265: add private b_strategy option for
@@ -36,10 +36,10 @@ Signed-off-by: Linjie Fu <linjie.fu@intel.com>
  4 files changed, 61 insertions(+), 6 deletions(-)
 
 diff --git a/doc/encoders.texi b/doc/encoders.texi
-index 45ad6cd095..9de797db9e 100644
+index 749c387086..c3ece1d988 100644
 --- a/doc/encoders.texi
 +++ b/doc/encoders.texi
-@@ -3149,6 +3149,22 @@ Some combination of the following values:
+@@ -3267,6 +3267,22 @@ Some combination of the following values:
  Include HDR metadata if the input frames have it
  (@emph{mastering_display_colour_volume} and @emph{content_light_level}
  messages).
@@ -63,10 +63,10 @@ index 45ad6cd095..9de797db9e 100644
  
  @item tiles
 diff --git a/libavcodec/vaapi_encode.c b/libavcodec/vaapi_encode.c
-index a4fea02f5f..61b96da347 100644
+index 75a029c4c5..e5fbbc85ed 100644
 --- a/libavcodec/vaapi_encode.c
 +++ b/libavcodec/vaapi_encode.c
-@@ -1911,15 +1911,26 @@ static av_cold int vaapi_encode_init_gop_structure(AVCodecContext *avctx)
+@@ -1910,15 +1910,26 @@ static av_cold int vaapi_encode_init_gop_structure(AVCodecContext *avctx)
                 "reference frames.\n");
          return AVERROR(EINVAL);
      } else if (!(ctx->codec->flags & FLAG_B_PICTURES) ||
@@ -99,10 +99,10 @@ index a4fea02f5f..61b96da347 100644
          ctx->p_per_i  = INT_MAX;
          ctx->b_per_p  = avctx->max_b_frames;
 diff --git a/libavcodec/vaapi_encode.h b/libavcodec/vaapi_encode.h
-index ca84af231a..36c2e98686 100644
+index 0f094ec5c1..5a17316917 100644
 --- a/libavcodec/vaapi_encode.h
 +++ b/libavcodec/vaapi_encode.h
-@@ -339,6 +339,7 @@ typedef struct VAAPIEncodeContext {
+@@ -338,6 +338,7 @@ typedef struct VAAPIEncodeContext {
      int idr_counter;
      int gop_counter;
      int end_of_stream;
@@ -111,7 +111,7 @@ index ca84af231a..36c2e98686 100644
  
      // Whether the driver supports ROI at all.
 diff --git a/libavcodec/vaapi_encode_h265.c b/libavcodec/vaapi_encode_h265.c
-index 73b5c0026f..f6a8e570af 100644
+index a9b5a8c8d5..307ed732b5 100644
 --- a/libavcodec/vaapi_encode_h265.c
 +++ b/libavcodec/vaapi_encode_h265.c
 @@ -62,6 +62,7 @@ typedef struct VAAPIEncodeH265Context {
@@ -120,9 +120,9 @@ index 73b5c0026f..f6a8e570af 100644
      int sei;
 +    int b_frame_strategy;
  
-     int trows;
-     int tcols;
-@@ -923,7 +924,7 @@ static int vaapi_encode_h265_init_slice_params(AVCodecContext *avctx,
+     // Derived settings.
+     int fixed_qp_idr;
+@@ -939,7 +940,7 @@ static int vaapi_encode_h265_init_slice_params(AVCodecContext *avctx,
  
      sh->slice_type = hpic->slice_type;
      // driver requires low delay B frame in low power mode
@@ -131,7 +131,7 @@ index 73b5c0026f..f6a8e570af 100644
          sh->slice_type = HEVC_SLICE_B;
  
      sh->slice_pic_order_cnt_lsb = hpic->pic_order_cnt &
-@@ -1084,6 +1085,9 @@ static int vaapi_encode_h265_init_slice_params(AVCodecContext *avctx,
+@@ -1100,6 +1101,9 @@ static int vaapi_encode_h265_init_slice_params(AVCodecContext *avctx,
          av_assert0(pic->type == PICTURE_TYPE_P ||
                     pic->type == PICTURE_TYPE_B);
          vslice->ref_pic_list0[0] = vpic->reference_frames[0];
@@ -141,9 +141,9 @@ index 73b5c0026f..f6a8e570af 100644
      }
      if (pic->nb_refs >= 2) {
          // Forward reference for B-frame.
-@@ -1231,6 +1235,21 @@ static av_cold int vaapi_encode_h265_init(AVCodecContext *avctx)
-         ctx->tile_cols = priv->tcols;
-     }
+@@ -1246,6 +1250,21 @@ static av_cold int vaapi_encode_h265_init(AVCodecContext *avctx)
+     if (priv->qp > 0)
+         ctx->explicit_qp = priv->qp;
  
 +    // Low delay B-frames is required for low power encoding.
 +    if (ctx->low_power && priv->b_frame_strategy != 1) {
@@ -163,7 +163,7 @@ index 73b5c0026f..f6a8e570af 100644
      return ff_vaapi_encode_init(avctx);
  }
  
-@@ -1306,6 +1325,14 @@ static const AVOption vaapi_encode_h265_options[] = {
+@@ -1321,6 +1340,14 @@ static const AVOption vaapi_encode_h265_options[] = {
        0, AV_OPT_TYPE_CONST,
        { .i64 = SEI_MASTERING_DISPLAY | SEI_CONTENT_LIGHT_LEVEL },
        INT_MIN, INT_MAX, FLAGS, "sei" },
@@ -176,8 +176,8 @@ index 73b5c0026f..f6a8e570af 100644
 +        { "ref_b",       "Only convert P-frames to low delay B-frames as references",
 +                          0, AV_OPT_TYPE_CONST, { .i64 = 2 }, INT_MIN, INT_MAX, FLAGS, "b_strategy" },
  
-     { "tiles", "Tile rows x cols",
-       OFFSET(trows), AV_OPT_TYPE_IMAGE_SIZE, { .str = NULL }, 0, 0, FLAGS },
+     { "tiles", "Tile columns x rows",
+       OFFSET(common.tile_cols), AV_OPT_TYPE_IMAGE_SIZE,
 -- 
 2.17.1
 
