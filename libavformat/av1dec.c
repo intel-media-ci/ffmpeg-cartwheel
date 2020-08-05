@@ -28,6 +28,9 @@
 #include "avio_internal.h"
 #include "internal.h"
 
+//2 + max leb 128 size
+#define MAX_HEAD_SIZE 10
+
 typedef struct AnnexBContext {
     const AVClass *class;
     AVBSFContext *bsf;
@@ -139,9 +142,8 @@ static int annexb_probe(const AVProbeData *p)
     return 0;
 }
 
-static int annexb_read_header(AVFormatContext *s)
+static int read_header(AVFormatContext *s, AVRational framerate, AVBSFContext **bsf, void *c)
 {
-    AnnexBContext *c = s->priv_data;
     const AVBitStreamFilter *filter = av_bsf_get_by_name("av1_frame_merge");
     AVStream *st;
     int ret;
@@ -160,25 +162,32 @@ static int annexb_read_header(AVFormatContext *s)
     st->codecpar->codec_id = AV_CODEC_ID_AV1;
     st->need_parsing = AVSTREAM_PARSE_HEADERS;
 
-    st->internal->avctx->framerate = c->framerate;
+    st->internal->avctx->framerate = framerate;
     // taken from rawvideo demuxers
     avpriv_set_pts_info(st, 64, 1, 1200000);
 
-    ret = av_bsf_alloc(filter, &c->bsf);
+    ret = av_bsf_alloc(filter, bsf);
     if (ret < 0)
         return ret;
 
-    ret = avcodec_parameters_copy(c->bsf->par_in, st->codecpar);
+    ret = avcodec_parameters_copy((*bsf)->par_in, st->codecpar);
     if (ret < 0) {
-        av_bsf_free(&c->bsf);
+        av_bsf_free(bsf);
         return ret;
     }
 
-    ret = av_bsf_init(c->bsf);
+    ret = av_bsf_init(*bsf);
     if (ret < 0)
-        av_bsf_free(&c->bsf);
+        av_bsf_free(bsf);
 
     return ret;
+
+}
+
+static int annexb_read_header(AVFormatContext *s)
+{
+    AnnexBContext *c = s->priv_data;
+    return read_header(s, c->framerate, &c->bsf, c);
 }
 
 static int annexb_read_packet(AVFormatContext *s, AVPacket *pkt)
@@ -246,12 +255,158 @@ static int annexb_read_close(AVFormatContext *s)
     return 0;
 }
 
-#define OFFSET(x) offsetof(AnnexBContext, x)
+typedef struct LowOverheadContext {
+    const AVClass *class;
+    AVBSFContext *bsf;
+    AVRational framerate;
+    uint8_t prefetched[MAX_HEAD_SIZE];
+    //prefetched len
+    int len;
+} LowOverheadContext;
+
+static int low_overhead_probe(const AVProbeData *p)
+{
+    AVIOContext pb;
+    int64_t obu_size;
+    int ret, type, cnt = 0, has_size_flag;
+
+    ffio_init_context(&pb, p->buf, p->buf_size, 0,
+                      NULL, NULL, NULL, NULL);
+
+    // Check that the first OBU is a Temporal Delimiter.
+    ret = read_obu(p->buf + cnt, FFMIN(p->buf_size - cnt, MAX_HEAD_SIZE), &obu_size, &type, &has_size_flag);
+    if (ret < 0 || type != AV1_OBU_TEMPORAL_DELIMITER || obu_size != 0 || !has_size_flag)
+        return 0;
+    cnt += ret;
+
+    ret = read_obu(p->buf + cnt, FFMIN(p->buf_size - cnt, MAX_HEAD_SIZE), &obu_size, &type, &has_size_flag);
+    if (ret < 0 || type != AV1_OBU_SEQUENCE_HEADER || !has_size_flag)
+        return 0;
+    cnt += ret;
+
+    ret = read_obu(p->buf + cnt, FFMIN(p->buf_size - cnt, MAX_HEAD_SIZE), &obu_size, &type, &has_size_flag);
+    if (ret < 0 || (type != AV1_OBU_FRAME && type != AV1_OBU_FRAME_HEADER) || obu_size <= 0 || !has_size_flag)
+        return 0;
+    return AVPROBE_SCORE_EXTENSION + 1;
+}
+
+static int low_overhead_read_header(AVFormatContext *s)
+{
+    LowOverheadContext *c = s->priv_data;
+    return read_header(s, c->framerate, &c->bsf, c);
+}
+
+static int low_overhead_prefetch(AVFormatContext *s)
+{
+    LowOverheadContext *c = s->priv_data;
+    int ret;
+    int size = MAX_HEAD_SIZE - c->len;
+    if (size > 0 && !avio_feof(s->pb)) {
+        ret = avio_read(s->pb, &c->prefetched[c->len], size);
+        if (ret < 0)
+            return ret;
+        c->len += ret;
+    }
+    return c->len;
+}
+
+static int low_overhead_read_data(AVFormatContext *s, AVPacket *pkt, int size)
+{
+    int left;
+    LowOverheadContext *c = s->priv_data;
+    int ret = av_new_packet(pkt, size);
+    if (ret < 0) {
+        av_log(c, AV_LOG_ERROR, "Failed to allocate packet for obu\n");
+        return ret;
+    }
+    if (size <= c->len) {
+        memcpy(pkt->data, c->prefetched, size);
+
+        left = c->len - size;
+        memcpy(c->prefetched, c->prefetched + size, left);
+        c->len = left;
+    } else {
+        memcpy(pkt->data, c->prefetched, c->len);
+        left = size - c->len;
+        ret = avio_read(s->pb, pkt->data + c->len, left);
+        if (ret != left) {
+            av_log(c, AV_LOG_ERROR, "Failed to read %d frome file\n", left);
+            return ret;
+        }
+        c->len = 0;
+    }
+    return 0;
+}
+
+static int low_overhead_get_packet(AVFormatContext *s, AVPacket *pkt)
+{
+    int64_t obu_size;
+    int ret, type, has_size_flag;
+    LowOverheadContext *c = s->priv_data;
+    ret = low_overhead_prefetch(s);
+    if (ret < 0)
+        return ret;
+    if (ret) {
+        ret = read_obu(c->prefetched, c->len, &obu_size, &type, &has_size_flag);
+        if (ret < 0 && !has_size_flag) {
+            av_log(c, AV_LOG_ERROR, "Failed to read obu\n");
+            return ret;
+        }
+        ret = low_overhead_read_data(s, pkt, ret);
+    }
+    return ret;
+}
+
+static int low_overhead_read_packet(AVFormatContext *s, AVPacket *pkt)
+{
+    LowOverheadContext *c = s->priv_data;
+    int ret;
+
+    while (1) {
+        ret = low_overhead_get_packet(s, pkt);
+        if (ret < 0)
+            return ret;
+        ret = av_bsf_send_packet(c->bsf, pkt);
+        if (ret < 0) {
+            av_log(s, AV_LOG_ERROR, "Failed to send packet to "
+                                    "av1_frame_merge filter\n");
+            return ret;
+        }
+        ret = av_bsf_receive_packet(c->bsf, pkt);
+        if (ret < 0 && ret != AVERROR(EAGAIN) && ret != AVERROR_EOF)
+            av_log(s, AV_LOG_ERROR, "av1_frame_merge filter failed to "
+                                "send output packet\n");
+
+        if (ret != AVERROR(EAGAIN))
+            break;
+    }
+
+    return ret;
+}
+
+static int low_overhead_read_close(AVFormatContext *s)
+{
+    LowOverheadContext *c = s->priv_data;
+
+    av_bsf_free(&c->bsf);
+    return 0;
+}
+
 #define DEC AV_OPT_FLAG_DECODING_PARAM
+
+#define OFFSET(x) offsetof(AnnexBContext, x)
 static const AVOption annexb_options[] = {
     { "framerate", "", OFFSET(framerate), AV_OPT_TYPE_VIDEO_RATE, {.str = "25"}, 0, INT_MAX, DEC},
     { NULL },
 };
+#undef OFFSET
+
+#define OFFSET(x) offsetof(LowOverheadContext, x)
+static const AVOption low_overhead_options[] = {
+    { "framerate", "", OFFSET(framerate), AV_OPT_TYPE_VIDEO_RATE, {.str = "25"}, 0, INT_MAX, DEC},
+    { NULL },
+};
+#undef OFFSET
 
 static const AVClass annexb_demuxer_class = {
     .class_name = "AV1 Annex B demuxer",
@@ -271,4 +426,24 @@ AVInputFormat ff_av1_demuxer = {
     .extensions     = "obu",
     .flags          = AVFMT_GENERIC_INDEX,
     .priv_class     = &annexb_demuxer_class,
+};
+
+static const AVClass low_overhead_demuxer_class = {
+    .class_name = "AV1 low overhead OBU demuxer",
+    .item_name  = av_default_item_name,
+    .option     = low_overhead_options,
+    .version    = LIBAVUTIL_VERSION_INT,
+};
+
+AVInputFormat ff_av1_low_overhead_demuxer = {
+    .name           = "av1",
+    .long_name      = NULL_IF_CONFIG_SMALL("AV1 low overhead OBU"),
+    .priv_data_size = sizeof(LowOverheadContext),
+    .read_probe     = low_overhead_probe,
+    .read_header    = low_overhead_read_header,
+    .read_packet    = low_overhead_read_packet,
+    .read_close     = low_overhead_read_close,
+    .extensions     = "obu",
+    .flags          = AVFMT_GENERIC_INDEX,
+    .priv_class     = &low_overhead_demuxer_class,
 };
