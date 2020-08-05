@@ -60,14 +60,9 @@ static int leb(AVIOContext *pb, uint32_t *len) {
 static int read_obu(const uint8_t *buf, int size, int64_t *obu_size, int *type, int *has_size_flag)
 {
     int start_pos, temporal_id, spatial_id;
-    int len;
 
-    len = parse_obu_header(buf, size, obu_size, &start_pos,
+    return parse_obu_header(buf, size, obu_size, &start_pos,
                            type, &temporal_id, &spatial_id, has_size_flag);
-    if (len < 0)
-        return len;
-
-    return 0;
 }
 
 static int annexb_probe(const AVProbeData *p)
@@ -137,8 +132,8 @@ static int annexb_probe(const AVProbeData *p)
             break;
         }
 
-        temporal_unit_size -= obu_unit_size + ret;
-        frame_unit_size -= obu_unit_size + ret;
+        temporal_unit_size -= obu_unit_size;
+        frame_unit_size -= obu_unit_size;
     } while (frame_unit_size);
 
     return 0;
