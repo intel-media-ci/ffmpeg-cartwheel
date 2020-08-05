@@ -135,7 +135,7 @@ static inline int parse_obu_header(const uint8_t *buf, int buf_size,
 
     size = *obu_size + *start_pos;
 
-    if (size > buf_size)
+    if (!*has_size_flag && size > buf_size)
         return AVERROR_INVALIDDATA;
 
     return size;
