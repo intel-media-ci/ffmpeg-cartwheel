@@ -1,4 +1,4 @@
-From 0a8752f67a6f290e4ee4202d7fb4f143b7c33413 Mon Sep 17 00:00:00 2001
+From b08b45078d2667b3e3bc8f763f9eb8691547895d Mon Sep 17 00:00:00 2001
 From: Linjie Fu <linjie.fu@intel.com>
 Date: Mon, 15 Jun 2020 10:58:19 +0800
 Subject: [PATCH] lavu/pixfmt: add new pixel format 0yuv/y410
@@ -18,13 +18,14 @@ upstreaming.
 
 Signed-off-by: Linjie Fu <linjie.fu@intel.com>
 ---
- libavutil/pixdesc.c              | 37 +++++++++++++++++++++++++++++++++++++
+ libavutil/pixdesc.c              | 37 ++++++++++++++++++++++++++++++++
  libavutil/pixfmt.h               |  5 +++++
- tests/ref/fate/sws-pixdesc-query | 11 +++++++++++
- 3 files changed, 53 insertions(+)
+ tests/ref/fate/imgutils          |  3 +++
+ tests/ref/fate/sws-pixdesc-query | 11 ++++++++++
+ 4 files changed, 56 insertions(+)
 
 diff --git a/libavutil/pixdesc.c b/libavutil/pixdesc.c
-index 8274713..584bf42 100644
+index 8274713226..584bf42273 100644
 --- a/libavutil/pixdesc.c
 +++ b/libavutil/pixdesc.c
 @@ -228,6 +228,43 @@ static const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
@@ -72,7 +73,7 @@ index 8274713..584bf42 100644
          .name = "rgb24",
          .nb_components = 3,
 diff --git a/libavutil/pixfmt.h b/libavutil/pixfmt.h
-index a46acf3..fe9d83e 100644
+index a46acf3c5e..fe9d83ea93 100644
 --- a/libavutil/pixfmt.h
 +++ b/libavutil/pixfmt.h
 @@ -358,6 +358,10 @@ enum AVPixelFormat {
@@ -94,8 +95,21 @@ index a46acf3..fe9d83e 100644
  #define AV_PIX_FMT_X2RGB10    AV_PIX_FMT_NE(X2RGB10BE, X2RGB10LE)
  
  /**
+diff --git a/tests/ref/fate/imgutils b/tests/ref/fate/imgutils
+index c968ea0e85..ddf6ff3345 100644
+--- a/tests/ref/fate/imgutils
++++ b/tests/ref/fate/imgutils
+@@ -234,5 +234,8 @@ nv24            planes: 2, linesizes:  64 128   0   0, plane_sizes:  3072  6144
+ nv42            planes: 2, linesizes:  64 128   0   0, plane_sizes:  3072  6144     0     0, plane_offsets:  3072     0     0, total_size: 9216
+ y210be          planes: 1, linesizes: 256   0   0   0, plane_sizes: 12288     0     0     0, plane_offsets:     0     0     0, total_size: 12288
+ y210le          planes: 1, linesizes: 256   0   0   0, plane_sizes: 12288     0     0     0, plane_offsets:     0     0     0, total_size: 12288
++0yuv            planes: 1, linesizes: 256   0   0   0, plane_sizes: 12288     0     0     0, plane_offsets:     0     0     0, total_size: 12288
++y410le          planes: 1, linesizes: 256   0   0   0, plane_sizes: 12288     0     0     0, plane_offsets:     0     0     0, total_size: 12288
++y410be          planes: 1, linesizes: 256   0   0   0, plane_sizes: 12288     0     0     0, plane_offsets:     0     0     0, total_size: 12288
+ x2rgb10le       planes: 1, linesizes: 256   0   0   0, plane_sizes: 12288     0     0     0, plane_offsets:     0     0     0, total_size: 12288
+ x2rgb10be       planes: 1, linesizes: 256   0   0   0, plane_sizes: 12288     0     0     0, plane_offsets:     0     0     0, total_size: 12288
 diff --git a/tests/ref/fate/sws-pixdesc-query b/tests/ref/fate/sws-pixdesc-query
-index c3cccfa..f023430 100644
+index c3cccfa492..f023430356 100644
 --- a/tests/ref/fate/sws-pixdesc-query
 +++ b/tests/ref/fate/sws-pixdesc-query
 @@ -63,6 +63,8 @@ isNBPS:
@@ -159,5 +173,5 @@ index c3cccfa..f023430 100644
    ya16le
    ya8
 -- 
-2.7.4
+2.17.1
 

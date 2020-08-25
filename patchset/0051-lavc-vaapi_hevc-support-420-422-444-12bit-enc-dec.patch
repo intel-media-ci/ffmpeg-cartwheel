@@ -1,4 +1,4 @@
-From 3b04d6f03f82d6a276407a56ffdad2efba70942a Mon Sep 17 00:00:00 2001
+From bef0e86ef006a19f3f7b0bca7c34e1c9864224fb Mon Sep 17 00:00:00 2001
 From: Fei Wang <fei.w.wang@intel.com>
 Date: Tue, 14 Jul 2020 10:21:55 +0800
 Subject: [PATCH] lavc/vaapi_hevc: support 420/422/444 12bit enc/dec
@@ -12,8 +12,9 @@ Subject: [PATCH] lavc/vaapi_hevc: support 420/422/444 12bit enc/dec
  libavutil/hwcontext_vaapi.c      | 10 +++++
  libavutil/pixdesc.c              | 73 ++++++++++++++++++++++++++++++++
  libavutil/pixfmt.h               | 11 +++++
+ tests/ref/fate/imgutils          |  6 +++
  tests/ref/fate/sws-pixdesc-query | 27 ++++++++++++
- 9 files changed, 161 insertions(+)
+ 10 files changed, 167 insertions(+)
 
 diff --git a/libavcodec/hevcdec.c b/libavcodec/hevcdec.c
 index 71ef8c9c7a..892022910e 100644
@@ -74,10 +75,10 @@ index f3147242ef..ace515b907 100644
                                                  source_format, 0, NULL);
          if (format == best_format)
 diff --git a/libavcodec/vaapi_encode.c b/libavcodec/vaapi_encode.c
-index 38992e9943..7c19a945cf 100644
+index e5fbbc85ed..4d2d7d37a6 100644
 --- a/libavcodec/vaapi_encode.c
 +++ b/libavcodec/vaapi_encode.c
-@@ -1265,6 +1265,11 @@ static const VAAPIEncodeRTFormat vaapi_encode_rt_formats[] = {
+@@ -1261,6 +1261,11 @@ static const VAAPIEncodeRTFormat vaapi_encode_rt_formats[] = {
  #if VA_CHECK_VERSION(0, 38, 1)
      { "YUV420_10", VA_RT_FORMAT_YUV420_10BPP, 10, 3, 1, 1 },
  #endif
@@ -90,10 +91,10 @@ index 38992e9943..7c19a945cf 100644
  
  static const VAEntrypoint vaapi_encode_entrypoints_normal[] = {
 diff --git a/libavcodec/vaapi_encode_h265.c b/libavcodec/vaapi_encode_h265.c
-index 00860baddc..6defdce62e 100644
+index c82d091c6d..4e5a7e65e6 100644
 --- a/libavcodec/vaapi_encode_h265.c
 +++ b/libavcodec/vaapi_encode_h265.c
-@@ -1164,7 +1164,11 @@ static const VAAPIEncodeProfile vaapi_encode_h265_profiles[] = {
+@@ -1180,7 +1180,11 @@ static const VAAPIEncodeProfile vaapi_encode_h265_profiles[] = {
  #if VA_CHECK_VERSION(1, 2, 0)
      { FF_PROFILE_HEVC_REXT,     8, 3, 1, 0, VAProfileHEVCMain422_10 },
      { FF_PROFILE_HEVC_REXT,    10, 3, 1, 0, VAProfileHEVCMain422_10 },
@@ -126,7 +127,7 @@ index 027612dc99..7d68861c1e 100644
      av_log(avctx, AV_LOG_WARNING, "HEVC profile %s is "
             "not supported with this VA version.\n", profile->name);
 diff --git a/libavutil/hwcontext_vaapi.c b/libavutil/hwcontext_vaapi.c
-index a1491df697..c8e8352992 100644
+index c33475c734..dd4034ea21 100644
 --- a/libavutil/hwcontext_vaapi.c
 +++ b/libavutil/hwcontext_vaapi.c
 @@ -130,6 +130,16 @@ static const VAAPIFormatDescriptor vaapi_format_map[] = {
@@ -288,6 +289,32 @@ index fe9d83ea93..22554350be 100644
  #define AV_PIX_FMT_X2RGB10    AV_PIX_FMT_NE(X2RGB10BE, X2RGB10LE)
  
  /**
+diff --git a/tests/ref/fate/imgutils b/tests/ref/fate/imgutils
+index ddf6ff3345..26e35ff91e 100644
+--- a/tests/ref/fate/imgutils
++++ b/tests/ref/fate/imgutils
+@@ -214,6 +214,8 @@ gray12be        planes: 1, linesizes: 128   0   0   0, plane_sizes:  6144     0
+ gray12le        planes: 1, linesizes: 128   0   0   0, plane_sizes:  6144     0     0     0, plane_offsets:     0     0     0, total_size: 6144
+ gray10be        planes: 1, linesizes: 128   0   0   0, plane_sizes:  6144     0     0     0, plane_offsets:     0     0     0, total_size: 6144
+ gray10le        planes: 1, linesizes: 128   0   0   0, plane_sizes:  6144     0     0     0, plane_offsets:     0     0     0, total_size: 6144
++p012le          planes: 2, linesizes: 128 128   0   0, plane_sizes:  6144  3072     0     0, plane_offsets:  6144     0     0, total_size: 9216
++p012be          planes: 2, linesizes: 128 128   0   0, plane_sizes:  6144  3072     0     0, plane_offsets:  6144     0     0, total_size: 9216
+ p016le          planes: 2, linesizes: 128 128   0   0, plane_sizes:  6144  3072     0     0, plane_offsets:  6144     0     0, total_size: 9216
+ p016be          planes: 2, linesizes: 128 128   0   0, plane_sizes:  6144  3072     0     0, plane_offsets:  6144     0     0, total_size: 9216
+ gray9be         planes: 1, linesizes: 128   0   0   0, plane_sizes:  6144     0     0     0, plane_offsets:     0     0     0, total_size: 6144
+@@ -234,8 +236,12 @@ nv24            planes: 2, linesizes:  64 128   0   0, plane_sizes:  3072  6144
+ nv42            planes: 2, linesizes:  64 128   0   0, plane_sizes:  3072  6144     0     0, plane_offsets:  3072     0     0, total_size: 9216
+ y210be          planes: 1, linesizes: 256   0   0   0, plane_sizes: 12288     0     0     0, plane_offsets:     0     0     0, total_size: 12288
+ y210le          planes: 1, linesizes: 256   0   0   0, plane_sizes: 12288     0     0     0, plane_offsets:     0     0     0, total_size: 12288
++y212be          planes: 1, linesizes: 256   0   0   0, plane_sizes: 12288     0     0     0, plane_offsets:     0     0     0, total_size: 12288
++y212le          planes: 1, linesizes: 256   0   0   0, plane_sizes: 12288     0     0     0, plane_offsets:     0     0     0, total_size: 12288
+ 0yuv            planes: 1, linesizes: 256   0   0   0, plane_sizes: 12288     0     0     0, plane_offsets:     0     0     0, total_size: 12288
+ y410le          planes: 1, linesizes: 256   0   0   0, plane_sizes: 12288     0     0     0, plane_offsets:     0     0     0, total_size: 12288
+ y410be          planes: 1, linesizes: 256   0   0   0, plane_sizes: 12288     0     0     0, plane_offsets:     0     0     0, total_size: 12288
++y412le          planes: 1, linesizes: 512   0   0   0, plane_sizes: 24576     0     0     0, plane_offsets:     0     0     0, total_size: 24576
++y412be          planes: 1, linesizes: 512   0   0   0, plane_sizes: 24576     0     0     0, plane_offsets:     0     0     0, total_size: 24576
+ x2rgb10le       planes: 1, linesizes: 256   0   0   0, plane_sizes: 12288     0     0     0, plane_offsets:     0     0     0, total_size: 12288
+ x2rgb10be       planes: 1, linesizes: 256   0   0   0, plane_sizes: 12288     0     0     0, plane_offsets:     0     0     0, total_size: 12288
 diff --git a/tests/ref/fate/sws-pixdesc-query b/tests/ref/fate/sws-pixdesc-query
 index f023430356..50d134ef32 100644
 --- a/tests/ref/fate/sws-pixdesc-query
