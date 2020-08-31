@@ -11936,6 +11936,9 @@ Display video size or number of audio channels in case of audio used by filter l
 
 @item rate
 Display video frame rate or sample rate in case of audio used by filter link.
+
+@item eof
+Display link output status.
 @end table
 
 @item rate, r
@@ -22569,6 +22572,17 @@ Set number of colors to use at once. Allowed range is from 2 to 8. Default value
 
 @item seed
 Set seed for picking gradient line points.
+
+@item duration, d
+Set the duration of the sourced video. See
+@ref{time duration syntax,,the Time duration section in the ffmpeg-utils(1) manual,ffmpeg-utils}
+for the accepted syntax.
+
+If not specified, or the expressed duration is negative, the video is
+supposed to be generated forever.
+
+@item speed
+Set speed of gradients rotation.
 @end table
 
 
