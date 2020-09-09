@@ -1,4 +1,4 @@
-From 30d3345bcd6d140108ac462ba07cc63d57b3d70b Mon Sep 17 00:00:00 2001
+From 7a32948b37e9dc419e4c96415e30c8977d388a8f Mon Sep 17 00:00:00 2001
 From: Xinpeng Sun <xinpeng.sun@intel.com>
 Date: Wed, 26 Feb 2020 13:53:34 +0800
 Subject: [PATCH] avfilter: add overlay vaapi filter
@@ -27,10 +27,10 @@ Signed-off-by: Zachary Zhou <zachary.zhou@intel.com>
  create mode 100644 libavfilter/vf_overlay_vaapi.c
 
 diff --git a/configure b/configure
-index 8569a60bf8..38e3cf7d02 100755
+index f13d1a8c9a..a634cad345 100755
 --- a/configure
 +++ b/configure
-@@ -3558,6 +3558,7 @@ openclsrc_filter_deps="opencl"
+@@ -3574,6 +3574,7 @@ openclsrc_filter_deps="opencl"
  overlay_opencl_filter_deps="opencl"
  overlay_qsv_filter_deps="libmfx"
  overlay_qsv_filter_select="qsvvpp"
@@ -38,7 +38,7 @@ index 8569a60bf8..38e3cf7d02 100755
  overlay_vulkan_filter_deps="vulkan libglslang"
  owdenoise_filter_deps="gpl"
  pad_opencl_filter_deps="opencl"
-@@ -3618,6 +3619,7 @@ tonemap_vaapi_filter_deps="vaapi VAProcFilterParameterBufferHDRToneMapping"
+@@ -3634,6 +3635,7 @@ tonemap_vaapi_filter_deps="vaapi VAProcFilterParameterBufferHDRToneMapping"
  tonemap_opencl_filter_deps="opencl const_nan"
  transpose_opencl_filter_deps="opencl"
  transpose_vaapi_filter_deps="vaapi VAProcPipelineCaps_rotation_flags"
@@ -46,7 +46,7 @@ index 8569a60bf8..38e3cf7d02 100755
  unsharp_opencl_filter_deps="opencl"
  uspp_filter_deps="gpl avcodec"
  vaguedenoiser_filter_deps="gpl"
-@@ -6640,6 +6642,7 @@ if enabled vaapi; then
+@@ -6684,6 +6686,7 @@ if enabled vaapi; then
      check_struct "va/va.h" "VADecPictureParameterBufferVP9" bit_depth
      check_type   "va/va.h va/va_vpp.h" "VAProcFilterParameterBufferHDRToneMapping"
      check_struct "va/va.h va/va_vpp.h" "VAProcPipelineCaps" rotation_flags
@@ -55,10 +55,10 @@ index 8569a60bf8..38e3cf7d02 100755
      check_type "va/va.h va/va_enc_jpeg.h" "VAEncPictureParameterBufferJPEG"
      check_type "va/va.h va/va_enc_vp8.h"  "VAEncPictureParameterBufferVP8"
 diff --git a/doc/filters.texi b/doc/filters.texi
-index f76604c51e..a18e3acc9c 100644
+index cbb16f22b2..3f199a931f 100644
 --- a/doc/filters.texi
 +++ b/doc/filters.texi
-@@ -22052,6 +22052,57 @@ To enable compilation of these filters you need to configure FFmpeg with
+@@ -22260,6 +22260,57 @@ To enable compilation of these filters you need to configure FFmpeg with
  
  To use vaapi filters, you need to setup the vaapi device correctly. For more information, please read @url{https://trac.ffmpeg.org/wiki/Hardware/VAAPI}
  
@@ -117,10 +117,10 @@ index f76604c51e..a18e3acc9c 100644
  
  Perform HDR(High Dynamic Range) to SDR(Standard Dynamic Range) conversion with tone-mapping.
 diff --git a/libavfilter/Makefile b/libavfilter/Makefile
-index 5123540653..c991f9ba7c 100644
+index e6d3c283da..4384b344fd 100644
 --- a/libavfilter/Makefile
 +++ b/libavfilter/Makefile
-@@ -331,6 +331,7 @@ OBJS-$(CONFIG_OVERLAY_CUDA_FILTER)           += vf_overlay_cuda.o framesync.o vf
+@@ -332,6 +332,7 @@ OBJS-$(CONFIG_OVERLAY_CUDA_FILTER)           += vf_overlay_cuda.o framesync.o vf
  OBJS-$(CONFIG_OVERLAY_OPENCL_FILTER)         += vf_overlay_opencl.o opencl.o \
                                                  opencl/overlay.o framesync.o
  OBJS-$(CONFIG_OVERLAY_QSV_FILTER)            += vf_overlay_qsv.o framesync.o
@@ -129,10 +129,10 @@ index 5123540653..c991f9ba7c 100644
  OBJS-$(CONFIG_OWDENOISE_FILTER)              += vf_owdenoise.o
  OBJS-$(CONFIG_PAD_FILTER)                    += vf_pad.o
 diff --git a/libavfilter/allfilters.c b/libavfilter/allfilters.c
-index 1183e40267..8a149f90a9 100644
+index fa91e608e4..87bf86fbe5 100644
 --- a/libavfilter/allfilters.c
 +++ b/libavfilter/allfilters.c
-@@ -314,6 +314,7 @@ extern AVFilter ff_vf_oscilloscope;
+@@ -315,6 +315,7 @@ extern AVFilter ff_vf_oscilloscope;
  extern AVFilter ff_vf_overlay;
  extern AVFilter ff_vf_overlay_opencl;
  extern AVFilter ff_vf_overlay_qsv;
@@ -142,7 +142,7 @@ index 1183e40267..8a149f90a9 100644
  extern AVFilter ff_vf_owdenoise;
 diff --git a/libavfilter/vf_overlay_vaapi.c b/libavfilter/vf_overlay_vaapi.c
 new file mode 100644
-index 0000000000..993db9148e
+index 0000000000..893cdbd4c8
 --- /dev/null
 +++ b/libavfilter/vf_overlay_vaapi.c
 @@ -0,0 +1,426 @@
@@ -199,15 +199,15 @@ index 0000000000..993db9148e
 +        AV_PIX_FMT_NONE
 +    };
 +
-+    ret = ff_formats_ref(ff_make_format_list(pix_fmts), &ctx->inputs[MAIN]->out_formats);
++    ret = ff_formats_ref(ff_make_format_list(pix_fmts), &ctx->inputs[MAIN]->outcfg.formats);
 +    if (ret < 0)
 +        return ret;
 +
-+    ret = ff_formats_ref(ff_make_format_list(pix_fmts), &ctx->inputs[OVERLAY]->out_formats);
++    ret = ff_formats_ref(ff_make_format_list(pix_fmts), &ctx->inputs[OVERLAY]->outcfg.formats);
 +    if (ret < 0)
 +        return ret;
 +
-+    ret = ff_formats_ref(ff_make_format_list(pix_fmts), &ctx->outputs[0]->in_formats);
++    ret = ff_formats_ref(ff_make_format_list(pix_fmts), &ctx->outputs[0]->incfg.formats);
 +    if (ret < 0)
 +        return ret;
 +
