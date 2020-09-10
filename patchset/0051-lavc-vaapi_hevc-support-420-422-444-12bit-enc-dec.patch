@@ -1,4 +1,4 @@
-From bef0e86ef006a19f3f7b0bca7c34e1c9864224fb Mon Sep 17 00:00:00 2001
+From 4e47d173028534a05f22e705ef687bf6d23be8ed Mon Sep 17 00:00:00 2001
 From: Fei Wang <fei.w.wang@intel.com>
 Date: Tue, 14 Jul 2020 10:21:55 +0800
 Subject: [PATCH] lavc/vaapi_hevc: support 420/422/444 12bit enc/dec
@@ -33,21 +33,21 @@ index 71ef8c9c7a..892022910e 100644
          break;
      case AV_PIX_FMT_YUV420P12:
 diff --git a/libavcodec/vaapi_decode.c b/libavcodec/vaapi_decode.c
-index f3147242ef..ace515b907 100644
+index f3147242ef..65269821c2 100644
 --- a/libavcodec/vaapi_decode.c
 +++ b/libavcodec/vaapi_decode.c
 @@ -274,6 +274,15 @@ static const struct {
  #ifdef VA_FOURCC_P010
      MAP(P010, P010),
  #endif
-+#ifdef VA_FOURCC_P016
-+    MAP(P016, P012),
++#ifdef VA_FOURCC_P012
++    MAP(P012, P012),
 +#endif
-+#ifdef VA_FOURCC_Y216
-+    MAP(Y216, Y212),
++#ifdef VA_FOURCC_Y212
++    MAP(Y212, Y212),
 +#endif
-+#ifdef VA_FOURCC_Y416
-+    MAP(Y416, Y412),
++#ifdef VA_FOURCC_Y412
++    MAP(Y412, Y412),
 +#endif
  #ifdef VA_FOURCC_I010
      MAP(I010, YUV420P10),
@@ -127,21 +127,21 @@ index 027612dc99..7d68861c1e 100644
      av_log(avctx, AV_LOG_WARNING, "HEVC profile %s is "
             "not supported with this VA version.\n", profile->name);
 diff --git a/libavutil/hwcontext_vaapi.c b/libavutil/hwcontext_vaapi.c
-index c33475c734..dd4034ea21 100644
+index 0d2c34e452..68c7912d58 100644
 --- a/libavutil/hwcontext_vaapi.c
 +++ b/libavutil/hwcontext_vaapi.c
 @@ -130,6 +130,16 @@ static const VAAPIFormatDescriptor vaapi_format_map[] = {
  #ifdef VA_FOURCC_P010
      MAP(P010, YUV420_10BPP, P010, 0),
  #endif
-+#ifdef VA_FOURCC_P016
-+    MAP(P016, YUV420_12, P012LE, 0),
++#ifdef VA_FOURCC_P012
++    MAP(P012, YUV420_12, P012LE, 0),
 +#endif
-+#ifdef VA_FOURCC_Y216
-+    MAP(Y216, YUV422_12, Y212LE, 0),
++#ifdef VA_FOURCC_Y212
++    MAP(Y212, YUV422_12, Y212LE, 0),
 +#endif
-+#ifdef VA_FOURCC_Y416
-+    MAP(Y416, YUV444_12, Y412LE, 0),
++#ifdef VA_FOURCC_Y412
++    MAP(Y412, YUV444_12, Y412LE, 0),
 +#endif
 +
      MAP(BGRA, RGB32,   BGRA, 0),
