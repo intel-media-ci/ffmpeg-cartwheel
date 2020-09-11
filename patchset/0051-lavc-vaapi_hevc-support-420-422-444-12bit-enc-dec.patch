@@ -1,4 +1,4 @@
-From 4e47d173028534a05f22e705ef687bf6d23be8ed Mon Sep 17 00:00:00 2001
+From 6c847c5b2e1311810ceaf500092d6454fcbd7a0f Mon Sep 17 00:00:00 2001
 From: Fei Wang <fei.w.wang@intel.com>
 Date: Tue, 14 Jul 2020 10:21:55 +0800
 Subject: [PATCH] lavc/vaapi_hevc: support 420/422/444 12bit enc/dec
@@ -9,12 +9,12 @@ Subject: [PATCH] lavc/vaapi_hevc: support 420/422/444 12bit enc/dec
  libavcodec/vaapi_encode.c        |  5 +++
  libavcodec/vaapi_encode_h265.c   |  4 ++
  libavcodec/vaapi_hevc.c          |  9 ++++
- libavutil/hwcontext_vaapi.c      | 10 +++++
+ libavutil/hwcontext_vaapi.c      |  9 ++++
  libavutil/pixdesc.c              | 73 ++++++++++++++++++++++++++++++++
  libavutil/pixfmt.h               | 11 +++++
  tests/ref/fate/imgutils          |  6 +++
  tests/ref/fate/sws-pixdesc-query | 27 ++++++++++++
- 10 files changed, 167 insertions(+)
+ 10 files changed, 166 insertions(+)
 
 diff --git a/libavcodec/hevcdec.c b/libavcodec/hevcdec.c
 index 71ef8c9c7a..892022910e 100644
@@ -127,26 +127,25 @@ index 027612dc99..7d68861c1e 100644
      av_log(avctx, AV_LOG_WARNING, "HEVC profile %s is "
             "not supported with this VA version.\n", profile->name);
 diff --git a/libavutil/hwcontext_vaapi.c b/libavutil/hwcontext_vaapi.c
-index 0d2c34e452..68c7912d58 100644
+index 0d2c34e452..02eb56be89 100644
 --- a/libavutil/hwcontext_vaapi.c
 +++ b/libavutil/hwcontext_vaapi.c
-@@ -130,6 +130,16 @@ static const VAAPIFormatDescriptor vaapi_format_map[] = {
+@@ -129,6 +129,15 @@ static const VAAPIFormatDescriptor vaapi_format_map[] = {
+     MAP(Y800, YUV400,  GRAY8,   0),
  #ifdef VA_FOURCC_P010
      MAP(P010, YUV420_10BPP, P010, 0),
++#endif
++#ifdef VA_FOURCC_P016
++    MAP(P016, YUV420_12, P012LE, 0),
++#endif
++#ifdef VA_FOURCC_Y216
++    MAP(Y216, YUV422_12, Y212LE, 0),
++#endif
++#ifdef VA_FOURCC_Y416
++    MAP(Y416, YUV444_12, Y412LE, 0),
  #endif
-+#ifdef VA_FOURCC_P012
-+    MAP(P012, YUV420_12, P012LE, 0),
-+#endif
-+#ifdef VA_FOURCC_Y212
-+    MAP(Y212, YUV422_12, Y212LE, 0),
-+#endif
-+#ifdef VA_FOURCC_Y412
-+    MAP(Y412, YUV444_12, Y412LE, 0),
-+#endif
-+
      MAP(BGRA, RGB32,   BGRA, 0),
      MAP(BGRX, RGB32,   BGR0, 0),
-     MAP(RGBA, RGB32,   RGBA, 0),
 diff --git a/libavutil/pixdesc.c b/libavutil/pixdesc.c
 index 584bf42273..82df9f0f9a 100644
 --- a/libavutil/pixdesc.c
