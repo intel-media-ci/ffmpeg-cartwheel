@@ -1,7 +1,7 @@
-From 1317563100a55486672ce5b42c31004ae8c5c319 Mon Sep 17 00:00:00 2001
+From 87946a25b02d4feda14c0108e092b5783a26b0cf Mon Sep 17 00:00:00 2001
 From: Fei Wang <fei.w.wang@intel.com>
 Date: Tue, 1 Sep 2020 14:45:37 -0400
-Subject: [PATCH 2/2] avcodec: add av1 VAAPI decoder
+Subject: [PATCH] avcodec: add av1 VAAPI decoder
 
 Example cmdline:
 ffmpeg -hwaccel vaapi -hwaccel_device /dev/dri/renderD128 -v verbose \
@@ -18,10 +18,10 @@ ffmpeg -hwaccel vaapi -hwaccel_device /dev/dri/renderD128 -v verbose \
  create mode 100644 libavcodec/vaapi_av1.c
 
 diff --git a/configure b/configure
-index b1f0881db6..f9bf8ebff7 100755
+index 2106e124d5..ff15fde50a 100755
 --- a/configure
 +++ b/configure
-@@ -2916,6 +2916,8 @@ videotoolbox_hwaccel_deps="videotoolbox pthreads"
+@@ -2917,6 +2917,8 @@ videotoolbox_hwaccel_deps="videotoolbox pthreads"
  videotoolbox_hwaccel_extralibs="-framework QuartzCore"
  xvmc_deps="X11_extensions_XvMClib_h"
  
@@ -30,7 +30,7 @@ index b1f0881db6..f9bf8ebff7 100755
  h263_vaapi_hwaccel_deps="vaapi"
  h263_vaapi_hwaccel_select="h263_decoder"
  h263_videotoolbox_hwaccel_deps="videotoolbox"
-@@ -6681,6 +6683,7 @@ if enabled vaapi; then
+@@ -6673,6 +6675,7 @@ if enabled vaapi; then
      fi
  
      check_cpp_condition vaapi_1 "va/va.h" "VA_CHECK_VERSION(1, 0, 0)"
@@ -39,10 +39,10 @@ index b1f0881db6..f9bf8ebff7 100755
      check_type "va/va.h va/va_dec_hevc.h" "VAPictureParameterBufferHEVC"
      check_struct "va/va.h" "VADecPictureParameterBufferVP9" bit_depth
 diff --git a/libavcodec/Makefile b/libavcodec/Makefile
-index 8da66e2a84..bf6f14c437 100644
+index 3239a752ac..e51196de0c 100644
 --- a/libavcodec/Makefile
 +++ b/libavcodec/Makefile
-@@ -950,6 +950,7 @@ OBJS-$(CONFIG_VP9_NVDEC_HWACCEL)          += nvdec_vp9.o
+@@ -954,6 +954,7 @@ OBJS-$(CONFIG_VP9_NVDEC_HWACCEL)          += nvdec_vp9.o
  OBJS-$(CONFIG_VP9_VAAPI_HWACCEL)          += vaapi_vp9.o
  OBJS-$(CONFIG_VP9_VDPAU_HWACCEL)          += vdpau_vp9.o
  OBJS-$(CONFIG_VP8_QSV_HWACCEL)            += qsvdec_other.o
@@ -51,22 +51,22 @@ index 8da66e2a84..bf6f14c437 100644
  # libavformat dependencies
  OBJS-$(CONFIG_ISO_MEDIA)               += mpeg4audio.o mpegaudiodata.o
 diff --git a/libavcodec/av1dec.c b/libavcodec/av1dec.c
-index 071c27607a..9fc3c0d8df 100644
+index bd8acdaafe..7fc57b6889 100644
 --- a/libavcodec/av1dec.c
 +++ b/libavcodec/av1dec.c
-@@ -233,7 +233,7 @@ static int get_pixel_format(AVCodecContext *avctx)
+@@ -256,7 +256,7 @@ static int get_pixel_format(AVCodecContext *avctx)
      uint8_t bit_depth;
-     int ret = 0;
+     int ret;
      enum AVPixelFormat pix_fmt = AV_PIX_FMT_NONE;
 -#define HWACCEL_MAX (0)
 +#define HWACCEL_MAX (CONFIG_AV1_VAAPI_HWACCEL)
-     enum AVPixelFormat pix_fmts[HWACCEL_MAX + 1], *fmtp = pix_fmts;
+     enum AVPixelFormat pix_fmts[HWACCEL_MAX + 2], *fmtp = pix_fmts;
  
      if (seq->seq_profile == 2 && seq->color_config.high_bitdepth)
-@@ -294,6 +294,24 @@ static int get_pixel_format(AVCodecContext *avctx)
-         return -1;
+@@ -318,6 +318,24 @@ static int get_pixel_format(AVCodecContext *avctx)
      s->pix_fmt = pix_fmt;
  
+     *fmtp++ = s->pix_fmt;
 +    switch (s->pix_fmt) {
 +    case AV_PIX_FMT_YUV420P:
 +#if CONFIG_AV1_VAAPI_HWACCEL
@@ -86,9 +86,9 @@ index 071c27607a..9fc3c0d8df 100644
 +    }
 +
      *fmtp = AV_PIX_FMT_NONE;
-     avctx->sw_pix_fmt = s->pix_fmt;
+ 
      ret = ff_thread_get_format(avctx, pix_fmts);
-@@ -720,6 +738,9 @@ AVCodec ff_av1_decoder = {
+@@ -866,6 +884,9 @@ AVCodec ff_av1_decoder = {
      .flush                 = av1_decode_flush,
      .profiles              = NULL_IF_CONFIG_SMALL(ff_av1_profiles),
      .hw_configs            = (const AVCodecHWConfigInternal * []) {
@@ -112,7 +112,7 @@ index 6109c89bd6..18e9079c55 100644
  extern const AVHWAccel ff_h264_d3d11va_hwaccel;
 diff --git a/libavcodec/vaapi_av1.c b/libavcodec/vaapi_av1.c
 new file mode 100644
-index 0000000000..5d5cb04017
+index 0000000000..c5aeaf8b21
 --- /dev/null
 +++ b/libavcodec/vaapi_av1.c
 @@ -0,0 +1,285 @@
@@ -189,7 +189,7 @@ index 0000000000..5d5cb04017
 +    const AV1RawFrameHeader *frame_header = s->raw_frame_header;
 +    VAAPIDecodePicture *pic = s->cur_frame.hwaccel_picture_private;
 +    VADecPictureParameterBufferAV1 pic_param;
-+    int err, i, j;
++    int err = 0;
 +    uint8_t lr_type[4] = {AV1_RESTORE_NONE, AV1_RESTORE_SWITCHABLE, AV1_RESTORE_WIENER, AV1_RESTORE_SGRPROJ};
 +
 +    pic->output_surface = vaapi_av1_surface_id(&s->cur_frame);
@@ -290,7 +290,7 @@ index 0000000000..5d5cb04017
 +        },
 +    };
 +
-+    for (i = 0; i < 8; i++) {
++    for (int i = 0; i < 8; i++) {
 +        if (pic_param.pic_info_fields.bits.frame_type == AV1_FRAME_KEY)
 +            pic_param.ref_frame_map[i] = VA_INVALID_ID;
 +        else
@@ -298,16 +298,16 @@ index 0000000000..5d5cb04017
 +        av_log(avctx, AV_LOG_DEBUG, "Vaapi set ref surface id: %d - 0x:%x\n",
 +               i, pic_param.ref_frame_map[i]);
 +    }
-+    for (i = 0; i < 7; i++) {
++    for (int i = 0; i < 7; i++) {
 +        pic_param.ref_frame_idx[i] = frame_header->ref_frame_idx[i];
 +    }
-+    for (i = 0; i < 8; i++) {
++    for (int i = 0; i < 8; i++) {
 +        pic_param.ref_deltas[i] = s->cur_frame.loop_filter_ref_deltas[i];
 +    }
-+    for (i = 0; i < 2; i++) {
++    for (int i = 0; i < 2; i++) {
 +        pic_param.mode_deltas[i] = s->cur_frame.loop_filter_mode_deltas[i];
 +    }
-+    for (i = 0; i < 8; i++) {
++    for (int i = 0; i < 8; i++) {
 +        pic_param.cdef_y_strengths[i] =
 +            (frame_header->cdef_y_pri_strength[i] << 2) +
 +                frame_header->cdef_y_sec_strength[i];
@@ -315,18 +315,18 @@ index 0000000000..5d5cb04017
 +            (frame_header->cdef_uv_pri_strength[i] << 2) +
 +                frame_header->cdef_uv_sec_strength[i];
 +    }
-+    for (i = 0; i < frame_header->tile_cols; i++) {
++    for (int i = 0; i < frame_header->tile_cols; i++) {
 +        pic_param.width_in_sbs_minus_1[i] =
 +            frame_header->width_in_sbs_minus_1[i];
 +    }
-+    for (i = 0; i < frame_header->tile_rows; i++) {
++    for (int i = 0; i < frame_header->tile_rows; i++) {
 +        pic_param.height_in_sbs_minus_1[i] =
 +            frame_header->height_in_sbs_minus_1[i];
 +    }
-+    for (i = AV1_REF_FRAME_LAST; i <= AV1_REF_FRAME_ALTREF; i++) {
++    for (int i = AV1_REF_FRAME_LAST; i <= AV1_REF_FRAME_ALTREF; i++) {
 +        pic_param.wm[i - 1].wmtype =
 +            vaapi_av1_get_gm_type(s->cur_frame.gm_type[i]);
-+        for (j=0; j<6; j++)
++        for (int j=0; j<6; j++)
 +            pic_param.wm[i - 1].wmmat[j] = s->cur_frame.gm_params[i][j];
 +    }
 +    err = ff_vaapi_decode_make_param_buffer(avctx, pic,
@@ -357,7 +357,7 @@ index 0000000000..5d5cb04017
 +    VAAPIDecodePicture *pic = s->cur_frame.hwaccel_picture_private;
 +    VASliceParameterBufferAV1 slice_param;
 +    uint32_t offset;
-+    int err;
++    int err = 0;
 +
 +    for (int i = s->tg_start; i <= s->tg_end; i++) {
 +        memset(&slice_param, 0, sizeof(VASliceParameterBufferAV1));
@@ -402,7 +402,7 @@ index 0000000000..5d5cb04017
 +    .caps_internal        = HWACCEL_CAP_ASYNC_SAFE,
 +};
 diff --git a/libavcodec/vaapi_decode.c b/libavcodec/vaapi_decode.c
-index ace515b907..f13e2a61ab 100644
+index 65269821c2..90203207ad 100644
 --- a/libavcodec/vaapi_decode.c
 +++ b/libavcodec/vaapi_decode.c
 @@ -436,6 +436,11 @@ static const struct {
