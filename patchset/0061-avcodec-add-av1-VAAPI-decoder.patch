@@ -1,4 +1,4 @@
-From 87946a25b02d4feda14c0108e092b5783a26b0cf Mon Sep 17 00:00:00 2001
+From 42a785b748c9a31be025c7fc07774c984c92e7bd Mon Sep 17 00:00:00 2001
 From: Fei Wang <fei.w.wang@intel.com>
 Date: Tue, 1 Sep 2020 14:45:37 -0400
 Subject: [PATCH] avcodec: add av1 VAAPI decoder
@@ -39,7 +39,7 @@ index 2106e124d5..ff15fde50a 100755
      check_type "va/va.h va/va_dec_hevc.h" "VAPictureParameterBufferHEVC"
      check_struct "va/va.h" "VADecPictureParameterBufferVP9" bit_depth
 diff --git a/libavcodec/Makefile b/libavcodec/Makefile
-index 3239a752ac..e51196de0c 100644
+index 462c880341..c06a6d14e2 100644
 --- a/libavcodec/Makefile
 +++ b/libavcodec/Makefile
 @@ -954,6 +954,7 @@ OBJS-$(CONFIG_VP9_NVDEC_HWACCEL)          += nvdec_vp9.o
@@ -51,7 +51,7 @@ index 3239a752ac..e51196de0c 100644
  # libavformat dependencies
  OBJS-$(CONFIG_ISO_MEDIA)               += mpeg4audio.o mpegaudiodata.o
 diff --git a/libavcodec/av1dec.c b/libavcodec/av1dec.c
-index bd8acdaafe..7fc57b6889 100644
+index cb46801202..c9a3d6cd96 100644
 --- a/libavcodec/av1dec.c
 +++ b/libavcodec/av1dec.c
 @@ -256,7 +256,7 @@ static int get_pixel_format(AVCodecContext *avctx)
@@ -63,10 +63,10 @@ index bd8acdaafe..7fc57b6889 100644
      enum AVPixelFormat pix_fmts[HWACCEL_MAX + 2], *fmtp = pix_fmts;
  
      if (seq->seq_profile == 2 && seq->color_config.high_bitdepth)
-@@ -318,6 +318,24 @@ static int get_pixel_format(AVCodecContext *avctx)
+@@ -317,6 +317,24 @@ static int get_pixel_format(AVCodecContext *avctx)
+         return -1;
      s->pix_fmt = pix_fmt;
  
-     *fmtp++ = s->pix_fmt;
 +    switch (s->pix_fmt) {
 +    case AV_PIX_FMT_YUV420P:
 +#if CONFIG_AV1_VAAPI_HWACCEL
@@ -85,10 +85,10 @@ index bd8acdaafe..7fc57b6889 100644
 +        break;
 +    }
 +
+     *fmtp++ = s->pix_fmt;
      *fmtp = AV_PIX_FMT_NONE;
  
-     ret = ff_thread_get_format(avctx, pix_fmts);
-@@ -866,6 +884,9 @@ AVCodec ff_av1_decoder = {
+@@ -862,6 +880,9 @@ AVCodec ff_av1_decoder = {
      .flush                 = av1_decode_flush,
      .profiles              = NULL_IF_CONFIG_SMALL(ff_av1_profiles),
      .hw_configs            = (const AVCodecHWConfigInternal * []) {
