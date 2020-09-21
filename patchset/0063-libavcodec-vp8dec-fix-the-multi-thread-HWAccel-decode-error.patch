@@ -1,0 +1,115 @@
+From patchwork Tue Jun 11 06:52:29 2019
+Content-Type: text/plain; charset="utf-8"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+X-Patchwork-Submitter: Shaofei Wang <shaofei.wang@intel.com>
+X-Patchwork-Id: 13508
+Return-Path: <ffmpeg-devel-bounces@ffmpeg.org>
+X-Original-To: patchwork@ffaux-bg.ffmpeg.org
+Delivered-To: patchwork@ffaux-bg.ffmpeg.org
+Received: from ffbox0-bg.mplayerhq.hu (ffbox0-bg.ffmpeg.org [79.124.17.100])
+	by ffaux.localdomain (Postfix) with ESMTP id 8D3CF447028
+	for <patchwork@ffaux-bg.ffmpeg.org>;
+	Wed, 12 Jun 2019 08:41:05 +0300 (EEST)
+Received: from [127.0.1.1] (localhost [127.0.0.1])
+	by ffbox0-bg.mplayerhq.hu (Postfix) with ESMTP id 690A2680249;
+	Wed, 12 Jun 2019 08:41:05 +0300 (EEST)
+X-Original-To: ffmpeg-devel@ffmpeg.org
+Delivered-To: ffmpeg-devel@ffmpeg.org
+Received: from mga12.intel.com (mga12.intel.com [192.55.52.136])
+	by ffbox0-bg.mplayerhq.hu (Postfix) with ESMTPS id 2041F680258
+	for <ffmpeg-devel@ffmpeg.org>; Wed, 12 Jun 2019 08:40:57 +0300 (EEST)
+X-Amp-Result: SKIPPED(no attachment in message)
+X-Amp-File-Uploaded: False
+Received: from fmsmga007.fm.intel.com ([10.253.24.52])
+	by fmsmga106.fm.intel.com with ESMTP/TLS/DHE-RSA-AES256-GCM-SHA384;
+	11 Jun 2019 22:40:55 -0700
+X-ExtLoop1: 1
+Received: from unknown (HELO localhost.localdomain.bj.intel.com)
+	([172.16.181.167])
+	by fmsmga007.fm.intel.com with ESMTP; 11 Jun 2019 22:40:54 -0700
+From: Shaofei Wang <shaofei.wang@intel.com>
+To: ffmpeg-devel@ffmpeg.org
+Date: Tue, 11 Jun 2019 02:52:29 -0400
+Message-Id: <1560235949-29164-1-git-send-email-shaofei.wang@intel.com>
+X-Mailer: git-send-email 1.8.3.1
+Subject: [FFmpeg-devel] [PATCH v3] libavcodec/vp8dec: fix the multi-thread
+	HWAccel decode error
+X-BeenThere: ffmpeg-devel@ffmpeg.org
+X-Mailman-Version: 2.1.20
+Precedence: list
+List-Id: FFmpeg development discussions and patches <ffmpeg-devel.ffmpeg.org>
+List-Unsubscribe: <http://ffmpeg.org/mailman/options/ffmpeg-devel>,
+	<mailto:ffmpeg-devel-request@ffmpeg.org?subject=unsubscribe>
+List-Archive: <http://ffmpeg.org/pipermail/ffmpeg-devel/>
+List-Post: <mailto:ffmpeg-devel@ffmpeg.org>
+List-Help: <mailto:ffmpeg-devel-request@ffmpeg.org?subject=help>
+List-Subscribe: <http://ffmpeg.org/mailman/listinfo/ffmpeg-devel>,
+	<mailto:ffmpeg-devel-request@ffmpeg.org?subject=subscribe>
+Reply-To: FFmpeg development discussions and patches
+	<ffmpeg-devel@ffmpeg.org>
+Cc: haihao.xiang@intel.com, Shaofei Wang <shaofei.wang@intel.com>
+MIME-Version: 1.0
+Errors-To: ffmpeg-devel-bounces@ffmpeg.org
+Sender: "ffmpeg-devel" <ffmpeg-devel-bounces@ffmpeg.org>
+
+Fix the issue: https://github.com/intel/media-driver/issues/317
+
+the root cause is update_dimensions will be called multple times
+when decoder thread number is not only 1, but update_dimensions
+call get_pixel_format in each decode thread will trigger the
+hwaccel_uninit/hwaccel_init more than once. But only one hwaccel
+should be shared with all decode threads.
+in current context,
+there are 3 situations in the update_dimensions():
+1. First time calling. No matter single thread or multithread,
+   get_pixel_format() should be called after dimensions were
+   set;
+2. Dimention changed at the runtime. Dimention need to be
+   updated when macroblocks_base is already allocated,
+   get_pixel_format() should be called to recreate new frames
+   according to updated dimension;
+3. Multithread first time calling. After decoder init, the
+   other threads will call update_dimensions() at first time
+   to allocate macroblocks_base and set dimensions.
+   But get_pixel_format() is shouldn't be called due to low
+   level frames and context are already created.
+
+In this fix, we only call update_dimensions as need.
+
+Signed-off-by: Wang, Shaofei <shaofei.wang@intel.com>
+Reviewed-by: Jun, Zhao <jun.zhao@intel.com>
+Reviewed-by: Haihao Xiang <haihao.xiang@intel.com>
+---
+Updated typo in the commit message
+
+ libavcodec/vp8.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/libavcodec/vp8.c b/libavcodec/vp8.c
+index ba79e5f..0a7f38b 100644
+--- a/libavcodec/vp8.c
++++ b/libavcodec/vp8.c
+@@ -187,7 +187,7 @@ static av_always_inline
+ int update_dimensions(VP8Context *s, int width, int height, int is_vp7)
+ {
+     AVCodecContext *avctx = s->avctx;
+-    int i, ret;
++    int i, ret, dim_reset = 0;
+ 
+     if (width  != s->avctx->width || ((width+15)/16 != s->mb_width || (height+15)/16 != s->mb_height) && s->macroblocks_base ||
+         height != s->avctx->height) {
+@@ -196,9 +196,12 @@ int update_dimensions(VP8Context *s, int width, int height, int is_vp7)
+         ret = ff_set_dimensions(s->avctx, width, height);
+         if (ret < 0)
+             return ret;
++
++        dim_reset = (s->macroblocks_base != NULL);
+     }
+ 
+-    if (!s->actually_webp && !is_vp7) {
++    if ((s->pix_fmt == AV_PIX_FMT_NONE || dim_reset) &&
++         !s->actually_webp && !is_vp7) {
+         s->pix_fmt = get_pixel_format(s);
+         if (s->pix_fmt < 0)
+             return AVERROR(EINVAL);
