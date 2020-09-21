@@ -1,4 +1,4 @@
-From 28352dd7c23a1c670218c52404aa766a1f90209e Mon Sep 17 00:00:00 2001
+From 91dad01427c56ca5da223938720613bab5ac46f5 Mon Sep 17 00:00:00 2001
 From: Haihao Xiang <haihao.xiang@intel.com>
 Date: Mon, 20 Jul 2020 15:38:52 +0800
 Subject: [PATCH] lavc/qsvdec: Add QSV AV1 decoder
@@ -15,22 +15,22 @@ Signed-off-by: Haihao Xiang <haihao.xiang@intel.com>
  5 files changed, 37 insertions(+), 1 deletion(-)
 
 diff --git a/Changelog b/Changelog
-index 261b6b261a..1f93d6dd14 100644
+index 044a125fa45e..e3ebe7eb7c5d 100644
 --- a/Changelog
 +++ b/Changelog
-@@ -25,6 +25,7 @@ version <next>:
- - AV1 decoder (Hardware acceleration used only)
- - SVS demuxer
+@@ -27,6 +27,7 @@ version <next>:
  - Argonaut Games BRP demuxer
+ - DAT demuxer
+ - aax demuxer
 +- Intel QSV-accelerated AV1 decoding
  
  
  version 4.3:
 diff --git a/configure b/configure
-index 5d68695192..591067a7a8 100755
+index 5ee6b4a08f86..bcdca08ff13c 100755
 --- a/configure
 +++ b/configure
-@@ -3139,6 +3139,7 @@ vp9_qsv_encoder_deps="libmfx MFX_CODEC_VP9"
+@@ -3142,6 +3142,7 @@ vp9_qsv_encoder_deps="libmfx MFX_CODEC_VP9"
  vp9_qsv_encoder_select="qsvenc"
  vp9_v4l2m2m_decoder_deps="v4l2_m2m vp9_v4l2_m2m"
  wmv3_crystalhd_decoder_select="crystalhd"
@@ -39,7 +39,7 @@ index 5d68695192..591067a7a8 100755
  # parsers
  aac_parser_select="adts_header"
 diff --git a/libavcodec/allcodecs.c b/libavcodec/allcodecs.c
-index 713c5686a4..ae5642829e 100644
+index 713c5686a4d0..ae5642829eaf 100644
 --- a/libavcodec/allcodecs.c
 +++ b/libavcodec/allcodecs.c
 @@ -820,6 +820,7 @@ extern AVCodec ff_vp9_mediacodec_decoder;
@@ -51,10 +51,10 @@ index 713c5686a4..ae5642829e 100644
  // The iterate API is not usable with ossfuzz due to the excessive size of binaries created
  #if CONFIG_OSSFUZZ
 diff --git a/libavcodec/qsv.c b/libavcodec/qsv.c
-index 17720070f1..7816d2f93c 100644
+index 92fdf7a4f3eb..7102046e1378 100644
 --- a/libavcodec/qsv.c
 +++ b/libavcodec/qsv.c
-@@ -64,6 +64,10 @@ int ff_qsv_codec_id_to_mfx(enum AVCodecID codec_id)
+@@ -66,6 +66,10 @@ int ff_qsv_codec_id_to_mfx(enum AVCodecID codec_id)
      case AV_CODEC_ID_VP9:
          return MFX_CODEC_VP9;
  #endif
@@ -66,7 +66,7 @@ index 17720070f1..7816d2f93c 100644
      default:
          break;
 diff --git a/libavcodec/qsvdec_other.c b/libavcodec/qsvdec_other.c
-index b4df76739c..2775e07955 100644
+index b4df76739cdc..2775e0795543 100644
 --- a/libavcodec/qsvdec_other.c
 +++ b/libavcodec/qsvdec_other.c
 @@ -1,5 +1,5 @@
@@ -110,5 +110,5 @@ index b4df76739c..2775e07955 100644
 +};
 +#endif
 -- 
-2.25.1
+2.20.1
 
