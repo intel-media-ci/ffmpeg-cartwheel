@@ -1,4 +1,4 @@
-From d6cff76cfd5493ec8fd0f7628dd534518b0af022 Mon Sep 17 00:00:00 2001
+From 05a28cb75abe897ffb9c0f308503ed3b2451de24 Mon Sep 17 00:00:00 2001
 From: Haihao Xiang <haihao.xiang@intel.com>
 Date: Mon, 20 Jul 2020 15:38:52 +0800
 Subject: [PATCH] lavc/qsvdec: Add QSV AV1 decoder
@@ -15,7 +15,7 @@ Signed-off-by: Haihao Xiang <haihao.xiang@intel.com>
  5 files changed, 37 insertions(+), 1 deletion(-)
 
 diff --git a/Changelog b/Changelog
-index 044a125fa45e..e3ebe7eb7c5d 100644
+index 044a125fa4..e3ebe7eb7c 100644
 --- a/Changelog
 +++ b/Changelog
 @@ -27,6 +27,7 @@ version <next>:
@@ -27,7 +27,7 @@ index 044a125fa45e..e3ebe7eb7c5d 100644
  
  version 4.3:
 diff --git a/configure b/configure
-index 5ee6b4a08f86..bcdca08ff13c 100755
+index 5ee6b4a08f..bcdca08ff1 100755
 --- a/configure
 +++ b/configure
 @@ -3142,6 +3142,7 @@ vp9_qsv_encoder_deps="libmfx MFX_CODEC_VP9"
@@ -39,7 +39,7 @@ index 5ee6b4a08f86..bcdca08ff13c 100755
  # parsers
  aac_parser_select="adts_header"
 diff --git a/libavcodec/allcodecs.c b/libavcodec/allcodecs.c
-index 713c5686a4d0..ae5642829eaf 100644
+index 713c5686a4..ae5642829e 100644
 --- a/libavcodec/allcodecs.c
 +++ b/libavcodec/allcodecs.c
 @@ -820,6 +820,7 @@ extern AVCodec ff_vp9_mediacodec_decoder;
@@ -51,7 +51,7 @@ index 713c5686a4d0..ae5642829eaf 100644
  // The iterate API is not usable with ossfuzz due to the excessive size of binaries created
  #if CONFIG_OSSFUZZ
 diff --git a/libavcodec/qsv.c b/libavcodec/qsv.c
-index 92fdf7a4f3eb..7102046e1378 100644
+index 92fdf7a4f3..7102046e13 100644
 --- a/libavcodec/qsv.c
 +++ b/libavcodec/qsv.c
 @@ -66,6 +66,10 @@ int ff_qsv_codec_id_to_mfx(enum AVCodecID codec_id)
@@ -66,7 +66,7 @@ index 92fdf7a4f3eb..7102046e1378 100644
      default:
          break;
 diff --git a/libavcodec/qsvdec_other.c b/libavcodec/qsvdec_other.c
-index b4df76739cdc..2775e0795543 100644
+index b4df76739c..89c6c9de57 100644
 --- a/libavcodec/qsvdec_other.c
 +++ b/libavcodec/qsvdec_other.c
 @@ -1,5 +1,5 @@
@@ -99,7 +99,7 @@ index b4df76739cdc..2775e0795543 100644
 +    .decode         = qsv_decode_frame,
 +    .flush          = qsv_decode_flush,
 +    .close          = qsv_decode_close,
-+    .capabilities   = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_DR1 | AV_CODEC_CAP_AVOID_PROBING | AV_CODEC_CAP_HYBRID,
++    .capabilities   = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_DR1 | AV_CODEC_CAP_HYBRID,
 +    .priv_class     = &av1_qsv_class,
 +    .pix_fmts       = (const enum AVPixelFormat[]){ AV_PIX_FMT_NV12,
 +                                                    AV_PIX_FMT_P010,
@@ -110,5 +110,5 @@ index b4df76739cdc..2775e0795543 100644
 +};
 +#endif
 -- 
-2.20.1
+2.25.1
 
