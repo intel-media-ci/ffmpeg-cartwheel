@@ -27,6 +27,9 @@ version <next>:
 - Argonaut Games BRP demuxer
 - DAT demuxer
 - aax demuxer
+- IPU decoder, parser and demuxer
+- Intel QSV-accelerated AV1 decoding
+- Argonaut Games Video decoder
 
 
 version 4.3:

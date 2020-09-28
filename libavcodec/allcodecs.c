@@ -43,6 +43,7 @@ extern AVCodec ff_ansi_decoder;
 extern AVCodec ff_apng_encoder;
 extern AVCodec ff_apng_decoder;
 extern AVCodec ff_arbc_decoder;
+extern AVCodec ff_argo_decoder;
 extern AVCodec ff_asv1_encoder;
 extern AVCodec ff_asv1_decoder;
 extern AVCodec ff_asv2_encoder;
@@ -166,6 +167,7 @@ extern AVCodec ff_indeo3_decoder;
 extern AVCodec ff_indeo4_decoder;
 extern AVCodec ff_indeo5_decoder;
 extern AVCodec ff_interplay_video_decoder;
+extern AVCodec ff_ipu_decoder;
 extern AVCodec ff_jpeg2000_encoder;
 extern AVCodec ff_jpeg2000_decoder;
 extern AVCodec ff_jpegls_encoder;
@@ -820,6 +822,7 @@ extern AVCodec ff_vp9_mediacodec_decoder;
 extern AVCodec ff_vp9_qsv_decoder;
 extern AVCodec ff_vp9_vaapi_encoder;
 extern AVCodec ff_vp9_qsv_encoder;
+extern AVCodec ff_av1_qsv_decoder;
 
 // The iterate API is not usable with ossfuzz due to the excessive size of binaries created
 #if CONFIG_OSSFUZZ
