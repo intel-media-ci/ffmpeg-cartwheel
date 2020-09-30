@@ -405,6 +405,9 @@ static av_cold int av1_decode_free(AVCodecContext *avctx)
 static int set_context_with_sequence(AVCodecContext *avctx,
                                      const AV1RawSequenceHeader *seq)
 {
+    int width = seq->max_frame_width_minus_1 + 1;
+    int height = seq->max_frame_height_minus_1 + 1;
+
     avctx->profile = seq->seq_profile;
     avctx->level = seq->seq_level_idx[0];
 
@@ -422,6 +425,13 @@ static int set_context_with_sequence(AVCodecContext *avctx,
         avctx->chroma_sample_location = AVCHROMA_LOC_TOPLEFT;
         break;
     }
+
+    if (avctx->width != width || avctx->height != height) {
+        int ret = ff_set_dimensions(avctx, width, height);
+        if (ret < 0)
+            return ret;
+    }
+    avctx->sample_aspect_ratio = (AVRational) { 1, 1 };
 
     if (seq->timing_info.num_units_in_display_tick &&
         seq->timing_info.time_scale) {
@@ -703,7 +713,7 @@ static int av1_decode_frame(AVCodecContext *avctx, void *frame,
         // fall-through
         case AV1_OBU_FRAME:
         case AV1_OBU_FRAME_HEADER:
-            if (!s->seq_ref) {
+            if (!s->raw_seq) {
                 av_log(avctx, AV_LOG_ERROR, "Missing Sequence Header.\n");
                 ret = AVERROR_INVALIDDATA;
                 goto end;
@@ -844,6 +854,8 @@ static void av1_decode_flush(AVCodecContext *avctx)
     av1_frame_unref(avctx, &s->cur_frame);
     s->raw_frame_header = NULL;
     s->raw_seq = NULL;
+
+    ff_cbs_flush(s->cbc);
 }
 
 AVCodec ff_av1_decoder = {
