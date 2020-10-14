@@ -540,7 +540,7 @@ static void fill_buffer(AVIOContext *s)
 {
     int max_buffer_size = s->max_packet_size ?
                           s->max_packet_size : IO_BUFFER_SIZE;
-    uint8_t *dst        = s->buf_end - s->buffer + max_buffer_size < s->buffer_size ?
+    uint8_t *dst        = s->buf_end - s->buffer + max_buffer_size <= s->buffer_size ?
                           s->buf_end : s->buffer;
     int len             = s->buffer_size - (dst - s->buffer);
 
@@ -938,6 +938,11 @@ int ffio_fdopen(AVIOContext **s, URLContext *h)
     } else {
         buffer_size = IO_BUFFER_SIZE;
     }
+    if (!(h->flags & AVIO_FLAG_WRITE) && h->is_streamed) {
+        if (buffer_size > INT_MAX/2)
+            return AVERROR(EINVAL);
+        buffer_size *= 2;
+    }
     buffer = av_malloc(buffer_size);
     if (!buffer)
         return AVERROR(ENOMEM);
@@ -991,32 +996,46 @@ URLContext* ffio_geturlcontext(AVIOContext *s)
         return NULL;
 }
 
+static void update_checksum(AVIOContext *s)
+{
+    if (s->update_checksum && s->buf_ptr > s->checksum_ptr) {
+        s->checksum = s->update_checksum(s->checksum, s->checksum_ptr,
+                                         s->buf_ptr - s->checksum_ptr);
+    }
+}
+
 int ffio_ensure_seekback(AVIOContext *s, int64_t buf_size)
 {
     uint8_t *buffer;
     int max_buffer_size = s->max_packet_size ?
                           s->max_packet_size : IO_BUFFER_SIZE;
-    int filled = s->buf_end - s->buffer;
-    ptrdiff_t checksum_ptr_offset = s->checksum_ptr ? s->checksum_ptr - s->buffer : -1;
+    ptrdiff_t filled = s->buf_end - s->buf_ptr;
 
-    buf_size += s->buf_ptr - s->buffer + max_buffer_size;
+    if (buf_size <= s->buf_end - s->buf_ptr)
+        return 0;
 
-    if (buf_size < filled || s->seekable || !s->read_packet)
+    buf_size += max_buffer_size - 1;
+
+    if (buf_size + s->buf_ptr - s->buffer <= s->buffer_size || s->seekable || !s->read_packet)
         return 0;
     av_assert0(!s->write_flag);
 
-    buffer = av_malloc(buf_size);
-    if (!buffer)
-        return AVERROR(ENOMEM);
-
-    memcpy(buffer, s->buffer, filled);
-    av_free(s->buffer);
-    s->buf_ptr = buffer + (s->buf_ptr - s->buffer);
-    s->buf_end = buffer + (s->buf_end - s->buffer);
-    s->buffer = buffer;
-    s->buffer_size = buf_size;
-    if (checksum_ptr_offset >= 0)
-        s->checksum_ptr = s->buffer + checksum_ptr_offset;
+    if (buf_size <= s->buffer_size) {
+        update_checksum(s);
+        memmove(s->buffer, s->buf_ptr, filled);
+    } else {
+        buffer = av_malloc(buf_size);
+        if (!buffer)
+            return AVERROR(ENOMEM);
+        update_checksum(s);
+        memcpy(buffer, s->buf_ptr, filled);
+        av_free(s->buffer);
+        s->buffer = buffer;
+        s->buffer_size = buf_size;
+    }
+    s->buf_ptr = s->buffer;
+    s->buf_end = s->buffer + filled;
+    s->checksum_ptr = s->buffer;
     return 0;
 }
 
