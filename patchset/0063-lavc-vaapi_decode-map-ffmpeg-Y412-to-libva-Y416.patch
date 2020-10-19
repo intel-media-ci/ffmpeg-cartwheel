@@ -1,0 +1,34 @@
+From ba94587c8729abe28a7023eaf433c643152c50fb Mon Sep 17 00:00:00 2001
+From: Fei Wang <fei.w.wang@intel.com>
+Date: Mon, 19 Oct 2020 14:20:46 -0400
+Subject: [PATCH] lavc/vaapi_decode: map ffmpeg Y412 to libva Y416
+
+Since now, ffmpeg community doesn't decide which formt of Y412/Y416
+should be used for 444 12bit decode, and MSDK only support Y416,
+so use Y416 in vaapi side temporarily, so that the decode md5 will
+be same with ffmpeg-qsv. If commuinty choose Y412 in the feature,
+this patch can be discard, and we wiil need to support Y412 in MSDK.
+
+Signed-off-by: Fei Wang <fei.w.wang@intel.com>
+---
+ libavcodec/vaapi_decode.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/libavcodec/vaapi_decode.c b/libavcodec/vaapi_decode.c
+index 90203207ad..e9749dd458 100644
+--- a/libavcodec/vaapi_decode.c
++++ b/libavcodec/vaapi_decode.c
+@@ -280,8 +280,8 @@ static const struct {
+ #ifdef VA_FOURCC_Y212
+     MAP(Y212, Y212),
+ #endif
+-#ifdef VA_FOURCC_Y412
+-    MAP(Y412, Y412),
++#ifdef VA_FOURCC_Y416
++    MAP(Y416, Y412),
+ #endif
+ #ifdef VA_FOURCC_I010
+     MAP(I010, YUV420P10),
+-- 
+2.17.1
+
