@@ -1314,6 +1314,21 @@ Force the output to either unsigned 8-bit or signed 16-bit stereo
 aformat=sample_fmts=u8|s16:channel_layouts=stereo
 @end example
 
+@section afreqshift
+Apply frequency shift to input audio samples.
+
+The filter accepts the following options:
+
+@table @option
+@item shift
+Specify frequency shift. Allowed range is -INT_MAX to INT_MAX.
+Default value is 0.0.
+@end table
+
+@subsection Commands
+
+This filter supports the above option as @ref{commands}.
+
 @section agate
 
 A gate is mainly used to reduce lower parts of a signal. This kind of signal
@@ -2063,6 +2078,21 @@ It accepts the following values:
 @item sinusoidal, s
 @end table
 @end table
+
+@section aphaseshift
+Apply phase shift to input audio samples.
+
+The filter accepts the following options:
+
+@table @option
+@item shift
+Specify phase shift. Allowed range is from -1.0 to 1.0.
+Default value is 0.0.
+@end table
+
+@subsection Commands
+
+This filter supports the above option as @ref{commands}.
 
 @section apulsator
 
@@ -23355,6 +23385,39 @@ Set color which will be used for drawing median phase. If color is
 @item video
 Enable video output. Default is enabled.
 @end table
+
+@subsection phasing detection
+
+The filter also detects out of phase and mono sequences in stereo streams.
+It logs the sequence start, end and duration when it lasts longer or as long as the minimum set.
+
+The filter accepts the following options for this detection:
+
+@table @option
+@item phasing
+Enable mono and out of phase detection. Default is disabled.
+
+@item tolerance, t
+Set phase tolerance for mono detection, in amplitude ratio. Default is @code{0}.
+Allowed range is @code{[0, 1]}.
+
+@item angle, a
+Set angle threshold for out of phase detection, in degree. Default is @code{170}.
+Allowed range is @code{[90, 180]}.
+
+@item duration, d
+Set mono or out of phase duration until notification, expressed in seconds. Default is @code{2}.
+@end table
+
+@subsection Examples
+
+@itemize
+@item
+Complete example with @command{ffmpeg} to detect 1 second of mono with 0.001 phase tolerance:
+@example
+ffmpeg -i stereo.wav -af aphasemeter=video=0:phasing=1:duration=1:tolerance=0.001 -f null -
+@end example
+@end itemize
 
 @section avectorscope
 
