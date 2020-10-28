@@ -26,54 +26,6 @@
 #include "internal.h"
 #include "profiles.h"
 
-static void setup_past_independence(AV1Frame *f)
-{
-    f->loop_filter_delta_enabled = 1;
-
-    f->loop_filter_ref_deltas[AV1_REF_FRAME_INTRA] = 1;
-    f->loop_filter_ref_deltas[AV1_REF_FRAME_LAST] = 0;
-    f->loop_filter_ref_deltas[AV1_REF_FRAME_LAST2] = 0;
-    f->loop_filter_ref_deltas[AV1_REF_FRAME_LAST3] = 0;
-    f->loop_filter_ref_deltas[AV1_REF_FRAME_GOLDEN] = -1;
-    f->loop_filter_ref_deltas[AV1_REF_FRAME_BWDREF] = 0;
-    f->loop_filter_ref_deltas[AV1_REF_FRAME_ALTREF2] = -1;
-    f->loop_filter_ref_deltas[AV1_REF_FRAME_ALTREF] = -1;
-
-    f->loop_filter_mode_deltas[0] = 0;
-    f->loop_filter_mode_deltas[1] = 0;
-}
-
-static void load_previous_and_update(AV1DecContext *s)
-{
-    uint8_t primary_frame, prev_frame;
-
-    primary_frame = s->raw_frame_header->primary_ref_frame;
-    prev_frame = s->raw_frame_header->ref_frame_idx[primary_frame];
-    memcpy(s->cur_frame.loop_filter_ref_deltas,
-           s->ref[prev_frame].loop_filter_ref_deltas,
-           AV1_NUM_REF_FRAMES * sizeof(int8_t));
-    memcpy(s->cur_frame.loop_filter_mode_deltas,
-           s->ref[prev_frame].loop_filter_mode_deltas,
-           2 * sizeof(int8_t));
-
-    if (s->raw_frame_header->loop_filter_delta_update) {
-        for (int i = 0; i < AV1_NUM_REF_FRAMES; i++) {
-            if (s->raw_frame_header->update_ref_delta[i])
-                s->cur_frame.loop_filter_ref_deltas[i] =
-                    s->raw_frame_header->loop_filter_ref_deltas[i];
-        }
-
-        for (int i = 0; i < 2; i++) {
-            if (s->raw_frame_header->update_mode_delta[i])
-                s->cur_frame.loop_filter_mode_deltas[i] =
-                    s->raw_frame_header->loop_filter_mode_deltas[i];
-        }
-    }
-
-    s->cur_frame.loop_filter_delta_enabled =
-        s->raw_frame_header->loop_filter_delta_enabled;
-}
-
 static uint32_t inverse_recenter(int r, uint32_t v)
 {
     if (v > 2 * r)
@@ -105,12 +57,21 @@ static void read_global_param(AV1DecContext *s, int type, int ref, int idx)
 {
     uint8_t primary_frame, prev_frame;
     uint32_t abs_bits, prec_bits, round, prec_diff, sub, mx;
-    int32_t r;
+    int32_t r, prev_gm_param;
 
     primary_frame = s->raw_frame_header->primary_ref_frame;
     prev_frame = s->raw_frame_header->ref_frame_idx[primary_frame];
     abs_bits = AV1_GM_ABS_ALPHA_BITS;
     prec_bits = AV1_GM_ALPHA_PREC_BITS;
+
+    /* setup_past_independence() sets PrevGmParams to default values. We can
+     * simply point to the current's frame gm_params as they will be initialized
+     * with defaults at this point.
+     */
+    if (s->raw_frame_header->primary_ref_frame == AV1_PRIMARY_REF_NONE)
+        prev_gm_param = s->cur_frame.gm_params[ref][idx];
+    else
+        prev_gm_param = s->ref[prev_frame].gm_params[ref][idx];
 
     if (idx < 2) {
         if (type == AV1_WARP_MODEL_TRANSLATION) {
@@ -127,7 +88,7 @@ static void read_global_param(AV1DecContext *s, int type, int ref, int idx)
     prec_diff = AV1_WARPEDMODEL_PREC_BITS - prec_bits;
     sub = (idx % 3) == 2 ? (1 << prec_bits) : 0;
     mx = 1 << abs_bits;
-    r = (s->ref[prev_frame].gm_params[ref][idx] >> prec_diff) - sub;
+    r = (prev_gm_param >> prec_diff) - sub;
 
     s->cur_frame.gm_params[ref][idx] =
         (decode_signed_subexp_with_ref(s->raw_frame_header->gm_params[ref][idx],
@@ -363,13 +324,6 @@ static int av1_frame_ref(AVCodecContext *avctx, AV1Frame *dst, const AV1Frame *s
 
     dst->spatial_id = src->spatial_id;
     dst->temporal_id = src->temporal_id;
-    dst->loop_filter_delta_enabled = src->loop_filter_delta_enabled;
-    memcpy(dst->loop_filter_ref_deltas,
-           src->loop_filter_ref_deltas,
-           AV1_NUM_REF_FRAMES * sizeof(int8_t));
-    memcpy(dst->loop_filter_mode_deltas,
-           src->loop_filter_mode_deltas,
-           2 * sizeof(int8_t));
     memcpy(dst->gm_type,
            src->gm_type,
            AV1_NUM_REF_FRAMES * sizeof(uint8_t));
@@ -644,11 +598,6 @@ static int get_current_frame(AVCodecContext *avctx)
         av_log(avctx, AV_LOG_ERROR, "Failed to init tile data.\n");
         return ret;
     }
-
-    if (s->raw_frame_header->primary_ref_frame == AV1_PRIMARY_REF_NONE)
-        setup_past_independence(&s->cur_frame);
-    else
-        load_previous_and_update(s);
 
     global_motion_params(s);
 

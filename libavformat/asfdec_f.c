@@ -479,7 +479,7 @@ static int asf_read_stream_properties(AVFormatContext *s, int64_t size)
         if (is_dvr_ms_audio) {
             // codec_id and codec_tag are unreliable in dvr_ms
             // files. Set them later by probing stream.
-            st->request_probe    = 1;
+            st->internal->request_probe    = 1;
             st->codecpar->codec_tag = 0;
         }
         if (st->codecpar->codec_id == AV_CODEC_ID_AAC)
@@ -1682,11 +1682,11 @@ static int asf_read_seek(AVFormatContext *s, int stream_index,
             asf->index_read = -1;
     }
 
-    if (asf->index_read > 0 && st->index_entries) {
+    if (asf->index_read > 0 && st->internal->index_entries) {
         int index = av_index_search_timestamp(st, pts, flags);
         if (index >= 0) {
             /* find the position */
-            uint64_t pos = st->index_entries[index].pos;
+            uint64_t pos = st->internal->index_entries[index].pos;
 
             /* do the seek */
             av_log(s, AV_LOG_DEBUG, "SEEKTO: %"PRId64"\n", pos);
