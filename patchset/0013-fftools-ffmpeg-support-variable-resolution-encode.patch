@@ -1,6 +1,6 @@
-From 183f39633b7a7f2648ef340eba9f659e7ae73807 Mon Sep 17 00:00:00 2001
-From: Linjie Fu <linjie.fu@intel.com>
-Date: Wed, 31 Jul 2019 12:02:26 +0800
+From 0642301b19e877d1f13d8331de1464ee63516a94 Mon Sep 17 00:00:00 2001
+From: Fei Wang <fei.w.wang@intel.com>
+Date: Mon, 2 Nov 2020 10:45:29 +0800
 Subject: [PATCH] fftools/ffmpeg: support variable resolution encode
 
 Flush encoders when resolution change happens.
@@ -15,7 +15,7 @@ Signed-off-by: Linjie Fu <linjie.fu@intel.com>
  2 files changed, 15 insertions(+)
 
 diff --git a/fftools/ffmpeg.c b/fftools/ffmpeg.c
-index 6385bde..99ac4e5 100644
+index 7a27258758..0038774b81 100644
 --- a/fftools/ffmpeg.c
 +++ b/fftools/ffmpeg.c
 @@ -130,6 +130,7 @@ static void do_video_stats(OutputStream *ost, int frame_size);
@@ -26,9 +26,9 @@ index 6385bde..99ac4e5 100644
  
  static int run_as_daemon  = 0;
  static int nb_frames_dup = 0;
-@@ -1078,6 +1079,19 @@ static void do_video_out(OutputFile *of,
-     InputStream *ist = NULL;
-     AVFilterContext *filter = ost->filter->filter;
+@@ -1136,6 +1137,19 @@ static void do_video_out(OutputFile *of,
+     init_output_stream_wrapper(ost, next_picture, 1);
+     sync_ipts = adjust_frame_pts_to_encoder_tb(of, ost, next_picture);
  
 +    /* flush encoders in dynamic resolution encode */
 +    if (next_picture && (enc->width != next_picture->width ||
@@ -47,7 +47,7 @@ index 6385bde..99ac4e5 100644
          ist = input_streams[ost->source_index];
  
 diff --git a/libavcodec/rawenc.c b/libavcodec/rawenc.c
-index d181b74..0cccd21 100644
+index d181b74570..0cccd21420 100644
 --- a/libavcodec/rawenc.c
 +++ b/libavcodec/rawenc.c
 @@ -92,4 +92,5 @@ AVCodec ff_rawvideo_encoder = {
@@ -57,5 +57,5 @@ index d181b74..0cccd21 100644
 +    .capabilities   = AV_CODEC_CAP_PARAM_CHANGE | AV_CODEC_CAP_ENCODER_FLUSH,
  };
 -- 
-2.7.4
+2.17.1
 
