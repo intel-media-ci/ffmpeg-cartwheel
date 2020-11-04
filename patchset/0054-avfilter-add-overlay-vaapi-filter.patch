@@ -1,4 +1,4 @@
-From 7a32948b37e9dc419e4c96415e30c8977d388a8f Mon Sep 17 00:00:00 2001
+From 9b9a4d6edbf4b8b1e6ecd88ad32ee2f1d7ce2fef Mon Sep 17 00:00:00 2001
 From: Xinpeng Sun <xinpeng.sun@intel.com>
 Date: Wed, 26 Feb 2020 13:53:34 +0800
 Subject: [PATCH] avfilter: add overlay vaapi filter
@@ -27,10 +27,10 @@ Signed-off-by: Zachary Zhou <zachary.zhou@intel.com>
  create mode 100644 libavfilter/vf_overlay_vaapi.c
 
 diff --git a/configure b/configure
-index f13d1a8c9a..a634cad345 100755
+index 8a9e9b3cd7..a16898b276 100755
 --- a/configure
 +++ b/configure
-@@ -3574,6 +3574,7 @@ openclsrc_filter_deps="opencl"
+@@ -3578,6 +3578,7 @@ openclsrc_filter_deps="opencl"
  overlay_opencl_filter_deps="opencl"
  overlay_qsv_filter_deps="libmfx"
  overlay_qsv_filter_select="qsvvpp"
@@ -38,7 +38,7 @@ index f13d1a8c9a..a634cad345 100755
  overlay_vulkan_filter_deps="vulkan libglslang"
  owdenoise_filter_deps="gpl"
  pad_opencl_filter_deps="opencl"
-@@ -3634,6 +3635,7 @@ tonemap_vaapi_filter_deps="vaapi VAProcFilterParameterBufferHDRToneMapping"
+@@ -3638,6 +3639,7 @@ tonemap_vaapi_filter_deps="vaapi VAProcFilterParameterBufferHDRToneMapping"
  tonemap_opencl_filter_deps="opencl const_nan"
  transpose_opencl_filter_deps="opencl"
  transpose_vaapi_filter_deps="vaapi VAProcPipelineCaps_rotation_flags"
@@ -46,8 +46,8 @@ index f13d1a8c9a..a634cad345 100755
  unsharp_opencl_filter_deps="opencl"
  uspp_filter_deps="gpl avcodec"
  vaguedenoiser_filter_deps="gpl"
-@@ -6684,6 +6686,7 @@ if enabled vaapi; then
-     check_struct "va/va.h" "VADecPictureParameterBufferVP9" bit_depth
+@@ -6680,6 +6682,7 @@ if enabled vaapi; then
+     check_struct "va/va.h" "VADecPictureParameterBufferAV1" bit_depth_idx
      check_type   "va/va.h va/va_vpp.h" "VAProcFilterParameterBufferHDRToneMapping"
      check_struct "va/va.h va/va_vpp.h" "VAProcPipelineCaps" rotation_flags
 +    check_struct "va/va.h va/va_vpp.h" "VAProcPipelineCaps" blend_flags
@@ -55,10 +55,10 @@ index f13d1a8c9a..a634cad345 100755
      check_type "va/va.h va/va_enc_jpeg.h" "VAEncPictureParameterBufferJPEG"
      check_type "va/va.h va/va_enc_vp8.h"  "VAEncPictureParameterBufferVP8"
 diff --git a/doc/filters.texi b/doc/filters.texi
-index cbb16f22b2..3f199a931f 100644
+index a6de827ebf..f3b5d752b4 100644
 --- a/doc/filters.texi
 +++ b/doc/filters.texi
-@@ -22260,6 +22260,57 @@ To enable compilation of these filters you need to configure FFmpeg with
+@@ -22345,6 +22345,57 @@ To enable compilation of these filters you need to configure FFmpeg with
  
  To use vaapi filters, you need to setup the vaapi device correctly. For more information, please read @url{https://trac.ffmpeg.org/wiki/Hardware/VAAPI}
  
@@ -117,10 +117,10 @@ index cbb16f22b2..3f199a931f 100644
  
  Perform HDR(High Dynamic Range) to SDR(Standard Dynamic Range) conversion with tone-mapping.
 diff --git a/libavfilter/Makefile b/libavfilter/Makefile
-index e6d3c283da..4384b344fd 100644
+index 65d03f9191..6f2872c233 100644
 --- a/libavfilter/Makefile
 +++ b/libavfilter/Makefile
-@@ -332,6 +332,7 @@ OBJS-$(CONFIG_OVERLAY_CUDA_FILTER)           += vf_overlay_cuda.o framesync.o vf
+@@ -334,6 +334,7 @@ OBJS-$(CONFIG_OVERLAY_CUDA_FILTER)           += vf_overlay_cuda.o framesync.o vf
  OBJS-$(CONFIG_OVERLAY_OPENCL_FILTER)         += vf_overlay_opencl.o opencl.o \
                                                  opencl/overlay.o framesync.o
  OBJS-$(CONFIG_OVERLAY_QSV_FILTER)            += vf_overlay_qsv.o framesync.o
@@ -129,10 +129,10 @@ index e6d3c283da..4384b344fd 100644
  OBJS-$(CONFIG_OWDENOISE_FILTER)              += vf_owdenoise.o
  OBJS-$(CONFIG_PAD_FILTER)                    += vf_pad.o
 diff --git a/libavfilter/allfilters.c b/libavfilter/allfilters.c
-index fa91e608e4..87bf86fbe5 100644
+index 801c53f7c0..5d66c0faee 100644
 --- a/libavfilter/allfilters.c
 +++ b/libavfilter/allfilters.c
-@@ -315,6 +315,7 @@ extern AVFilter ff_vf_oscilloscope;
+@@ -317,6 +317,7 @@ extern AVFilter ff_vf_oscilloscope;
  extern AVFilter ff_vf_overlay;
  extern AVFilter ff_vf_overlay_opencl;
  extern AVFilter ff_vf_overlay_qsv;
