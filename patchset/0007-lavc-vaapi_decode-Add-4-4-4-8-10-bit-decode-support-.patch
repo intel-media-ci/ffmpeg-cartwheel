@@ -1,4 +1,4 @@
-From 4563c7e1c59d007d760533aebede688804fdb7fb Mon Sep 17 00:00:00 2001
+From 3324c5d7c172d11e72991f9e6b6f71b5fbc2ba72 Mon Sep 17 00:00:00 2001
 From: Linjie Fu <linjie.fu@intel.com>
 Date: Fri, 20 Sep 2019 10:07:02 +0800
 Subject: [PATCH] lavc/vaapi_decode: Add 4:4:4 8/10 bit decode support for VP9
@@ -12,7 +12,7 @@ Signed-off-by: Linjie Fu <linjie.fu@intel.com>
  2 files changed, 8 insertions(+)
 
 diff --git a/libavcodec/vaapi_decode.c b/libavcodec/vaapi_decode.c
-index 5e4f62baad..33a83562d0 100644
+index 57a0eb4e6e..c617de19ae 100644
 --- a/libavcodec/vaapi_decode.c
 +++ b/libavcodec/vaapi_decode.c
 @@ -408,7 +408,9 @@ static const struct {
@@ -23,8 +23,8 @@ index 5e4f62baad..33a83562d0 100644
      MAP(VP9,         VP9_2,           VP9Profile2 ),
 +    MAP(VP9,         VP9_3,           VP9Profile3 ),
  #endif
- #undef MAP
- };
+ #if VA_CHECK_VERSION(1, 8, 0)
+     MAP(AV1,         AV1_MAIN,        AV1Profile0),
 diff --git a/libavcodec/vp9.c b/libavcodec/vp9.c
 index 294059f863..8a331d0281 100644
 --- a/libavcodec/vp9.c
