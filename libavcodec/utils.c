@@ -1093,6 +1093,10 @@ void avcodec_flush_buffers(AVCodecContext *avctx)
     av_packet_unref(avci->compat_encode_packet);
     av_packet_unref(avci->buffer_pkt);
 
+    av_packet_unref(avci->last_pkt_props);
+    avpriv_packet_list_free(&avci->pkt_props,
+                            &avci->pkt_props_tail);
+
     av_frame_unref(avci->es.in_frame);
     av_packet_unref(avci->ds.in_pkt);
 
@@ -1491,6 +1495,7 @@ int av_get_exact_bits_per_sample(enum AVCodecID codec_id)
     case AV_CODEC_ID_ADPCM_ARGO:
     case AV_CODEC_ID_ADPCM_CT:
     case AV_CODEC_ID_ADPCM_IMA_ALP:
+    case AV_CODEC_ID_ADPCM_IMA_AMV:
     case AV_CODEC_ID_ADPCM_IMA_APC:
     case AV_CODEC_ID_ADPCM_IMA_APM:
     case AV_CODEC_ID_ADPCM_IMA_EA_SEAD:
@@ -1696,7 +1701,7 @@ static int get_audio_frame_duration(enum AVCodecID id, int sr, int ch, int ba,
             case AV_CODEC_ID_ADPCM_IMA_SMJPEG:
                 return (frame_bytes - 4) * 2 / ch;
             case AV_CODEC_ID_ADPCM_IMA_AMV:
-                return (frame_bytes - 8) * 2 / ch;
+                return (frame_bytes - 8) * 2;
             case AV_CODEC_ID_ADPCM_THP:
             case AV_CODEC_ID_ADPCM_THP_LE:
                 if (extradata)
