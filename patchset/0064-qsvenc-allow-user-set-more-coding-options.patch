@@ -1,0 +1,107 @@
+From 2d21599ac9ef87615c075a6d4b58f19e957981ee Mon Sep 17 00:00:00 2001
+From: Haihao Xiang <haihao.xiang@intel.com>
+Date: Thu, 5 Nov 2020 09:15:29 +0800
+Subject: [PATCH] qsvenc: allow user set more coding options
+
+And change the default setting for -strict and -flags
+---
+ libavcodec/qsvenc.c      | 15 ++++++++++++++-
+ libavcodec/qsvenc_h264.c |  3 ++-
+ libavcodec/qsvenc_hevc.c |  7 +++++--
+ 3 files changed, 21 insertions(+), 4 deletions(-)
+
+diff --git a/libavcodec/qsvenc.c b/libavcodec/qsvenc.c
+index 2bd2a56227..2193b2cd87 100644
+--- a/libavcodec/qsvenc.c
++++ b/libavcodec/qsvenc.c
+@@ -290,6 +290,10 @@ static void dump_video_param(AVCodecContext *avctx, QSVEncContext *q,
+                "NalHrdConformance: %s; SingleSeiNalUnit: %s; VuiVclHrdParameters: %s VuiNalHrdParameters: %s\n",
+                print_threestate(co->NalHrdConformance), print_threestate(co->SingleSeiNalUnit),
+                print_threestate(co->VuiVclHrdParameters), print_threestate(co->VuiNalHrdParameters));
++    } else if ((avctx->codec_id == AV_CODEC_ID_HEVC) && QSV_RUNTIME_VERSION_ATLEAST(q->ver, 1, 28)) {
++        av_log(avctx, AV_LOG_VERBOSE,
++               "NalHrdConformance: %s; VuiNalHrdParameters: %s\n",
++               print_threestate(co->NalHrdConformance), print_threestate(co->VuiNalHrdParameters));
+     }
+ 
+     av_log(avctx, AV_LOG_VERBOSE, "FrameRateExtD: %"PRIu32"; FrameRateExtN: %"PRIu32" \n",
+@@ -527,7 +531,7 @@ static int init_video_param(AVCodecContext *avctx, QSVEncContext *q)
+     q->param.mfx.GopPicSize         = FFMAX(0, avctx->gop_size);
+     q->param.mfx.GopRefDist         = FFMAX(-1, avctx->max_b_frames) + 1;
+     q->param.mfx.GopOptFlag         = avctx->flags & AV_CODEC_FLAG_CLOSED_GOP ?
+-                                      MFX_GOP_CLOSED : 0;
++                                      MFX_GOP_CLOSED : MFX_GOP_STRICT;
+     q->param.mfx.IdrInterval        = q->idr_interval;
+     q->param.mfx.NumSlice           = avctx->slices;
+     q->param.mfx.NumRefFrame        = FFMAX(0, avctx->refs);
+@@ -686,6 +690,15 @@ FF_ENABLE_DEPRECATION_WARNINGS
+                 q->extco.RecoveryPointSEI = q->recovery_point_sei ? MFX_CODINGOPTION_ON : MFX_CODINGOPTION_OFF;
+             q->extco.MaxDecFrameBuffering = q->max_dec_frame_buffering;
+             q->extco.AUDelimiter          = q->aud ? MFX_CODINGOPTION_ON : MFX_CODINGOPTION_OFF;
++        } else if (avctx->codec_id == AV_CODEC_ID_HEVC) {
++            if (avctx->strict_std_compliance != FF_COMPLIANCE_NORMAL)
++                q->extco.NalHrdConformance = avctx->strict_std_compliance > FF_COMPLIANCE_NORMAL ?
++                                             MFX_CODINGOPTION_ON : MFX_CODINGOPTION_OFF;
++
++            if (q->recovery_point_sei >= 0)
++                q->extco.RecoveryPointSEI = q->recovery_point_sei ? MFX_CODINGOPTION_ON : MFX_CODINGOPTION_OFF;
++
++            q->extco.AUDelimiter          = q->aud ? MFX_CODINGOPTION_ON : MFX_CODINGOPTION_OFF;
+         }
+ 
+         q->extparam_internal[q->nb_extparam_internal++] = (mfxExtBuffer *)&q->extco;
+diff --git a/libavcodec/qsvenc_h264.c b/libavcodec/qsvenc_h264.c
+index ddafc45ec3..17be0a7f14 100644
+--- a/libavcodec/qsvenc_h264.c
++++ b/libavcodec/qsvenc_h264.c
+@@ -173,10 +173,11 @@ static const AVCodecDefault qsv_enc_defaults[] = {
+     { "coder",     "-1"    },
+ #endif
+     { "trellis",   "-1"    },
+-    { "flags",     "+cgop" },
++    { "flags",     "-cgop" },
+ #if FF_API_PRIVATE_OPT
+     { "b_strategy", "-1"   },
+ #endif
++    { "strict",     "-1"   },
+     { NULL },
+ };
+ 
+diff --git a/libavcodec/qsvenc_hevc.c b/libavcodec/qsvenc_hevc.c
+index 347f30655e..7bfd8c8f1d 100644
+--- a/libavcodec/qsvenc_hevc.c
++++ b/libavcodec/qsvenc_hevc.c
+@@ -225,7 +225,7 @@ static av_cold int qsv_enc_close(AVCodecContext *avctx)
+ static const AVOption options[] = {
+     QSV_COMMON_OPTS
+ 
+-    { "idr_interval", "Distance (in I-frames) between IDR frames", OFFSET(qsv.idr_interval), AV_OPT_TYPE_INT, { .i64 = 0 }, -1, INT_MAX, VE, "idr_interval" },
++    { "idr_interval", "Distance (in I-frames) between IDR frames", OFFSET(qsv.idr_interval), AV_OPT_TYPE_INT, { .i64 = -1 }, -1, INT_MAX, VE, "idr_interval" },
+     { "begin_only", "Output an IDR-frame only at the beginning of the stream", 0, AV_OPT_TYPE_CONST, { .i64 = -1 }, 0, 0, VE, "idr_interval" },
+     { "load_plugin", "A user plugin to load in an internal session", OFFSET(load_plugin), AV_OPT_TYPE_INT, { .i64 = LOAD_PLUGIN_HEVC_HW }, LOAD_PLUGIN_NONE, LOAD_PLUGIN_HEVC_HW, VE, "load_plugin" },
+     { "none",     NULL, 0, AV_OPT_TYPE_CONST, { .i64 = LOAD_PLUGIN_NONE },    0, 0, VE, "load_plugin" },
+@@ -246,6 +246,8 @@ static const AVOption options[] = {
+ 
+     { "tile_cols",  "Number of columns for tiled encoding",   OFFSET(qsv.tile_cols),    AV_OPT_TYPE_INT, { .i64 = 0 }, 0, UINT16_MAX, VE },
+     { "tile_rows",  "Number of rows for tiled encoding",      OFFSET(qsv.tile_rows),    AV_OPT_TYPE_INT, { .i64 = 0 }, 0, UINT16_MAX, VE },
++    { "recovery_point_sei", "Insert recovery point SEI messages",       OFFSET(qsv.recovery_point_sei),      AV_OPT_TYPE_INT, { .i64 = -1 },               -1,          1, VE },
++    { "aud", "Insert the Access Unit Delimiter NAL", OFFSET(qsv.aud), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 1, VE},
+ 
+     { NULL },
+ };
+@@ -266,10 +268,11 @@ static const AVCodecDefault qsv_enc_defaults[] = {
+     { "qmin",      "-1"    },
+     { "qmax",      "-1"    },
+     { "trellis",   "-1"    },
+-    { "flags",     "+cgop" },
++    { "flags",     "-cgop" },
+ #if FF_API_PRIVATE_OPT
+     { "b_strategy", "-1"   },
+ #endif
++    { "strict",     "-1"   },
+     { NULL },
+ };
+ 
+-- 
+2.25.1
+
