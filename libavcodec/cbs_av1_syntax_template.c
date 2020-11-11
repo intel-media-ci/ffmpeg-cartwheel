@@ -1490,13 +1490,19 @@ static int FUNC(uncompressed_header)(CodedBitstreamContext *ctx, RWContext *rw,
         fb(8, refresh_frame_flags);
 
     if (!frame_is_intra || current->refresh_frame_flags != all_frames) {
-        if (current->error_resilient_mode && seq->enable_order_hint) {
+        if (seq->enable_order_hint) {
             for (i = 0; i < AV1_NUM_REF_FRAMES; i++) {
-                fbs(order_hint_bits, ref_order_hint[i], 1, i);
+                if (current->error_resilient_mode)
+                    fbs(order_hint_bits, ref_order_hint[i], 1, i);
+                else
+                    infer(ref_order_hint[i], priv->ref[i].order_hint);
                 if (current->ref_order_hint[i] != priv->ref[i].order_hint)
                     priv->ref[i].valid = 0;
             }
         }
+    } else if (!frame_is_intra && seq->enable_order_hint) {
+        for (i = 0; i < AV1_NUM_REF_FRAMES; i++)
+            infer(ref_order_hint[i], priv->ref[i].order_hint);
     }
 
     if (current->frame_type == AV1_FRAME_KEY ||
@@ -1719,6 +1725,8 @@ static int FUNC(frame_header_obu)(CodedBitstreamContext *ctx, RWContext *rw,
 
         CHECK(FUNC(uncompressed_header)(ctx, rw, current));
 
+        priv->tile_num = 0;
+
         if (current->show_existing_frame) {
             priv->seen_frame_header = 0;
         } else {
@@ -1784,9 +1792,11 @@ static int FUNC(tile_group_obu)(CodedBitstreamContext *ctx, RWContext *rw,
     } else {
         tile_bits = cbs_av1_tile_log2(1, priv->tile_cols) +
                     cbs_av1_tile_log2(1, priv->tile_rows);
-        fb(tile_bits, tg_start);
-        fb(tile_bits, tg_end);
+        fc(tile_bits, tg_start, priv->tile_num, num_tiles - 1);
+        fc(tile_bits, tg_end, current->tg_start, num_tiles - 1);
     }
+
+    priv->tile_num = current->tg_end + 1;
 
     CHECK(FUNC(byte_alignment)(ctx, rw));
 

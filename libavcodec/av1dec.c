@@ -145,6 +145,108 @@ static void global_motion_params(AV1DecContext *s)
     }
 }
 
+static int get_relative_dist(const AV1RawSequenceHeader *seq,
+                             unsigned int a, unsigned int b)
+{
+    unsigned int diff = a - b;
+    unsigned int m = 1 << seq->order_hint_bits_minus_1;
+    return (diff & (m - 1)) - (diff & m);
+}
+
+static void skip_mode_params(AV1DecContext *s)
+{
+    const AV1RawFrameHeader *header = s->raw_frame_header;
+    const AV1RawSequenceHeader *seq = s->raw_seq;
+
+    int forward_idx,  backward_idx;
+    int forward_hint, backward_hint;
+    int second_forward_idx, second_forward_hint;
+    int ref_hint, dist, i;
+
+    if (!header->skip_mode_present)
+        return;
+
+    forward_idx  = -1;
+    backward_idx = -1;
+    for (i = 0; i < AV1_REFS_PER_FRAME; i++) {
+        ref_hint = s->ref[header->ref_frame_idx[i]].order_hint;
+        dist = get_relative_dist(seq, ref_hint, header->order_hint);
+        if (dist < 0) {
+            if (forward_idx < 0 ||
+                get_relative_dist(seq, ref_hint, forward_hint) > 0) {
+                forward_idx  = i;
+                forward_hint = ref_hint;
+            }
+        } else if (dist > 0) {
+            if (backward_idx < 0 ||
+                get_relative_dist(seq, ref_hint, backward_hint) < 0) {
+                backward_idx  = i;
+                backward_hint = ref_hint;
+            }
+        }
+    }
+
+    if (forward_idx < 0) {
+        return;
+    } else if (backward_idx >= 0) {
+        s->cur_frame.skip_mode_frame_idx[0] =
+            AV1_REF_FRAME_LAST + FFMIN(forward_idx, backward_idx);
+        s->cur_frame.skip_mode_frame_idx[1] =
+            AV1_REF_FRAME_LAST + FFMAX(forward_idx, backward_idx);
+        return;
+    }
+
+    second_forward_idx = -1;
+    for (i = 0; i < AV1_REFS_PER_FRAME; i++) {
+        ref_hint = s->ref[header->ref_frame_idx[i]].order_hint;
+        if (get_relative_dist(seq, ref_hint, forward_hint) < 0) {
+            if (second_forward_idx < 0 ||
+                get_relative_dist(seq, ref_hint, second_forward_hint) > 0) {
+                second_forward_idx  = i;
+                second_forward_hint = ref_hint;
+            }
+        }
+    }
+
+    if (second_forward_idx < 0)
+        return;
+
+    s->cur_frame.skip_mode_frame_idx[0] =
+        AV1_REF_FRAME_LAST + FFMIN(forward_idx, second_forward_idx);
+    s->cur_frame.skip_mode_frame_idx[1] =
+        AV1_REF_FRAME_LAST + FFMAX(forward_idx, second_forward_idx);
+}
+
+static void coded_lossless_param(AV1DecContext *s)
+{
+    const AV1RawFrameHeader *header = s->raw_frame_header;
+    int i;
+
+    if (header->delta_q_y_dc || header->delta_q_u_ac ||
+        header->delta_q_u_dc || header->delta_q_v_ac ||
+        header->delta_q_v_dc) {
+        s->cur_frame.coded_lossless = 0;
+        return;
+    }
+
+    s->cur_frame.coded_lossless = 1;
+    for (i = 0; i < AV1_MAX_SEGMENTS; i++) {
+        int qindex;
+        if (header->feature_enabled[i][AV1_SEG_LVL_ALT_Q]) {
+            qindex = (header->base_q_idx +
+                      header->feature_value[i][AV1_SEG_LVL_ALT_Q]);
+        } else {
+            qindex = header->base_q_idx;
+        }
+        qindex = av_clip_uintp2(qindex, 8);
+
+        if (qindex) {
+            s->cur_frame.coded_lossless = 0;
+            return;
+        }
+    }
+}
+
 static int init_tile_data(AV1DecContext *s)
 
 {
@@ -215,7 +317,7 @@ static int get_pixel_format(AVCodecContext *avctx)
     uint8_t bit_depth;
     int ret;
     enum AVPixelFormat pix_fmt = AV_PIX_FMT_NONE;
-#define HWACCEL_MAX (CONFIG_AV1_VAAPI_HWACCEL)
+#define HWACCEL_MAX (CONFIG_AV1_NVDEC_HWACCEL + CONFIG_AV1_VAAPI_HWACCEL)
     enum AVPixelFormat pix_fmts[HWACCEL_MAX + 2], *fmtp = pix_fmts;
 
     if (seq->seq_profile == 2 && seq->color_config.high_bitdepth)
@@ -278,11 +380,17 @@ static int get_pixel_format(AVCodecContext *avctx)
 
     switch (s->pix_fmt) {
     case AV_PIX_FMT_YUV420P:
+#if CONFIG_AV1_NVDEC_HWACCEL
+        *fmtp++ = AV_PIX_FMT_CUDA;
+#endif
 #if CONFIG_AV1_VAAPI_HWACCEL
         *fmtp++ = AV_PIX_FMT_VAAPI;
 #endif
         break;
     case AV_PIX_FMT_YUV420P10:
+#if CONFIG_AV1_NVDEC_HWACCEL
+        *fmtp++ = AV_PIX_FMT_CUDA;
+#endif
 #if CONFIG_AV1_VAAPI_HWACCEL
         *fmtp++ = AV_PIX_FMT_VAAPI;
 #endif
@@ -318,6 +426,10 @@ static void av1_frame_unref(AVCodecContext *avctx, AV1Frame *f)
     av_buffer_unref(&f->hwaccel_priv_buf);
     f->hwaccel_picture_private = NULL;
     f->spatial_id = f->temporal_id = 0;
+    f->order_hint = 0;
+    memset(f->skip_mode_frame_idx, 0,
+           2 * sizeof(uint8_t));
+    f->coded_lossless = 0;
 }
 
 static int av1_frame_ref(AVCodecContext *avctx, AV1Frame *dst, const AV1Frame *src)
@@ -343,6 +455,11 @@ static int av1_frame_ref(AVCodecContext *avctx, AV1Frame *dst, const AV1Frame *s
     memcpy(dst->gm_params,
            src->gm_params,
            AV1_NUM_REF_FRAMES * 6 * sizeof(int32_t));
+    dst->order_hint = src->order_hint;
+    memcpy(dst->skip_mode_frame_idx,
+           src->skip_mode_frame_idx,
+           2 * sizeof(uint8_t));
+    dst->coded_lossless = src->coded_lossless;
 
     return 0;
 
@@ -613,6 +730,8 @@ static int get_current_frame(AVCodecContext *avctx)
     }
 
     global_motion_params(s);
+    skip_mode_params(s);
+    coded_lossless_param(s);
 
     return ret;
 }
@@ -740,6 +859,8 @@ static int av1_decode_frame(AVCodecContext *avctx, void *frame,
             s->cur_frame.spatial_id  = header->spatial_id;
             s->cur_frame.temporal_id = header->temporal_id;
 
+            s->cur_frame.order_hint = s->raw_frame_header->order_hint;
+
             if (avctx->hwaccel) {
                 ret = avctx->hwaccel->start_frame(avctx, unit->data,
                                                   unit->data_size);
@@ -853,6 +974,9 @@ AVCodec ff_av1_decoder = {
     .flush                 = av1_decode_flush,
     .profiles              = NULL_IF_CONFIG_SMALL(ff_av1_profiles),
     .hw_configs            = (const AVCodecHWConfigInternal * []) {
+#if CONFIG_AV1_NVDEC_HWACCEL
+        HWACCEL_NVDEC(av1),
+#endif
 #if CONFIG_AV1_VAAPI_HWACCEL
         HWACCEL_VAAPI(av1),
 #endif

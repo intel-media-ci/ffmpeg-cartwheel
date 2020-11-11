@@ -53,7 +53,6 @@
 
 /* Default timeout values for read packet in seconds  */
 #define READ_PACKET_TIMEOUT_S 10
-#define SDP_MAX_SIZE 16384
 #define RECVBUF_SIZE 10 * RTP_MAX_PACKET_LENGTH
 #define DEFAULT_REORDERING_DELAY 100000
 
@@ -688,15 +687,7 @@ int ff_sdp_parse(AVFormatContext *s, const char *content)
 {
     const char *p;
     int letter, i;
-    /* Some SDP lines, particularly for Realmedia or ASF RTSP streams,
-     * contain long SDP lines containing complete ASF Headers (several
-     * kB) or arrays of MDPR (RM stream descriptor) headers plus
-     * "rulebooks" describing their properties. Therefore, the SDP line
-     * buffer is large.
-     *
-     * The Vorbis FMTP line can be up to 16KB - see xiph_parse_sdp_line
-     * in rtpdec_xiph.c. */
-    char buf[16384], *q;
+    char buf[SDP_MAX_SIZE], *q;
     SDPParseState sdp_parse_state = { { 0 } }, *s1 = &sdp_parse_state;
 
     p = content;
@@ -1229,7 +1220,8 @@ start:
         content = av_malloc(content_length + 1);
         if (!content)
             return AVERROR(ENOMEM);
-        ffurl_read_complete(rt->rtsp_hd, content, content_length);
+        if (ffurl_read_complete(rt->rtsp_hd, content, content_length) != content_length)
+            return AVERROR(EIO);
         content[content_length] = '\0';
     }
     if (content_ptr)
@@ -1991,7 +1983,7 @@ static int udp_read_packet(AVFormatContext *s, RTSPStream **prtsp_st,
     int runs = rt->initial_timeout * 1000LL / POLLING_TIME;
 
     if (!p) {
-        p = rt->p = av_malloc_array(2 * rt->nb_rtsp_streams + 1, sizeof(struct pollfd));
+        p = rt->p = av_malloc_array(2 * rt->nb_rtsp_streams + 1, sizeof(*p));
         if (!p)
             return AVERROR(ENOMEM);
 
