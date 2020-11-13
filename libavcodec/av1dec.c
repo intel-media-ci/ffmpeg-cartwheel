@@ -169,7 +169,7 @@ static void skip_mode_params(AV1DecContext *s)
     forward_idx  = -1;
     backward_idx = -1;
     for (i = 0; i < AV1_REFS_PER_FRAME; i++) {
-        ref_hint = s->ref[header->ref_frame_idx[i]].order_hint;
+        ref_hint = s->ref[header->ref_frame_idx[i]].raw_frame_header->order_hint;
         dist = get_relative_dist(seq, ref_hint, header->order_hint);
         if (dist < 0) {
             if (forward_idx < 0 ||
@@ -198,7 +198,7 @@ static void skip_mode_params(AV1DecContext *s)
 
     second_forward_idx = -1;
     for (i = 0; i < AV1_REFS_PER_FRAME; i++) {
-        ref_hint = s->ref[header->ref_frame_idx[i]].order_hint;
+        ref_hint = s->ref[header->ref_frame_idx[i]].raw_frame_header->order_hint;
         if (get_relative_dist(seq, ref_hint, forward_hint) < 0) {
             if (second_forward_idx < 0 ||
                 get_relative_dist(seq, ref_hint, second_forward_hint) > 0) {
@@ -442,8 +442,9 @@ static void av1_frame_unref(AVCodecContext *avctx, AV1Frame *f)
     ff_thread_release_buffer(avctx, &f->tf);
     av_buffer_unref(&f->hwaccel_priv_buf);
     f->hwaccel_picture_private = NULL;
+    av_buffer_unref(&f->header_ref);
+    f->raw_frame_header = NULL;
     f->spatial_id = f->temporal_id = 0;
-    f->order_hint = 0;
     memset(f->skip_mode_frame_idx, 0,
            2 * sizeof(uint8_t));
     f->coded_lossless = 0;
@@ -456,6 +457,12 @@ static int av1_frame_ref(AVCodecContext *avctx, AV1Frame *dst, const AV1Frame *s
     ret = ff_thread_ref_frame(&dst->tf, &src->tf);
     if (ret < 0)
         return ret;
+
+    dst->header_ref = av_buffer_ref(src->header_ref);
+    if (!dst->header_ref)
+        goto fail;
+
+    dst->raw_frame_header = src->raw_frame_header;
 
     if (src->hwaccel_picture_private) {
         dst->hwaccel_priv_buf = av_buffer_ref(src->hwaccel_priv_buf);
@@ -472,7 +479,6 @@ static int av1_frame_ref(AVCodecContext *avctx, AV1Frame *dst, const AV1Frame *s
     memcpy(dst->gm_params,
            src->gm_params,
            AV1_NUM_REF_FRAMES * 6 * sizeof(int32_t));
-    dst->order_hint = src->order_hint;
     memcpy(dst->skip_mode_frame_idx,
            src->skip_mode_frame_idx,
            2 * sizeof(uint8_t));
@@ -642,6 +648,12 @@ static int av1_frame_alloc(AVCodecContext *avctx, AV1Frame *f)
     AV1RawFrameHeader *header= s->raw_frame_header;
     AVFrame *frame;
     int ret;
+
+    f->header_ref = av_buffer_ref(s->header_ref);
+    if (!f->header_ref)
+        return AVERROR(ENOMEM);
+
+    f->raw_frame_header = s->raw_frame_header;
 
     ret = update_context_with_frame_header(avctx, header);
     if (ret < 0) {
@@ -875,8 +887,6 @@ static int av1_decode_frame(AVCodecContext *avctx, void *frame,
 
             s->cur_frame.spatial_id  = header->spatial_id;
             s->cur_frame.temporal_id = header->temporal_id;
-
-            s->cur_frame.order_hint = s->raw_frame_header->order_hint;
 
             if (avctx->hwaccel) {
                 ret = avctx->hwaccel->start_frame(avctx, unit->data,

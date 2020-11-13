@@ -36,13 +36,15 @@ typedef struct AV1Frame {
     AVBufferRef *hwaccel_priv_buf;
     void *hwaccel_picture_private;
 
+    AVBufferRef *header_ref;
+    AV1RawFrameHeader *raw_frame_header;
+
     int temporal_id;
     int spatial_id;
 
     uint8_t gm_type[AV1_NUM_REF_FRAMES];
     int32_t gm_params[AV1_NUM_REF_FRAMES][6];
 
-    uint8_t order_hint;
     uint8_t skip_mode_frame_idx[2];
 
     uint8_t coded_lossless;
