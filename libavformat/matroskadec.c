@@ -2672,8 +2672,12 @@ static int matroska_parse_tracks(AVFormatContext *s)
             av_log(matroska->ctx, AV_LOG_INFO,
                    "Unknown/unsupported AVCodecID %s.\n", track->codec_id);
 
-        if (track->time_scale < 0.01)
+        if (track->time_scale < 0.01) {
+            av_log(matroska->ctx, AV_LOG_WARNING,
+                   "Track TimestampScale too small %f, assuming 1.0.\n",
+                   track->time_scale);
             track->time_scale = 1.0;
+        }
         avpriv_set_pts_info(st, 64, matroska->time_scale * track->time_scale,
                             1000 * 1000 * 1000);    /* 64 bit pts in ns */
 
@@ -3543,7 +3547,7 @@ static int matroska_parse_block(MatroskaDemuxContext *matroska, AVBufferRef *buf
     uint32_t lace_size[256];
     int n, flags, laces = 0;
     uint64_t num;
-    int trust_default_duration = 1;
+    int trust_default_duration;
 
     ffio_init_context(&pb, data, size, 0, NULL, NULL, NULL, NULL);
 
@@ -3577,7 +3581,8 @@ static int matroska_parse_block(MatroskaDemuxContext *matroska, AVBufferRef *buf
 
     if (cluster_time != (uint64_t) -1 &&
         (block_time >= 0 || cluster_time >= -block_time)) {
-        timecode = cluster_time + block_time - track->codec_delay_in_track_tb;
+        uint64_t timecode_cluster_in_track_tb = (double) cluster_time / track->time_scale;
+        timecode = timecode_cluster_in_track_tb + block_time - track->codec_delay_in_track_tb;
         if (track->type == MATROSKA_TRACK_TYPE_SUBTITLE &&
             timecode < track->end_timecode)
             is_keyframe = 0;  /* overlapping subtitles are not key frame */
@@ -3610,7 +3615,8 @@ static int matroska_parse_block(MatroskaDemuxContext *matroska, AVBufferRef *buf
         return res;
     }
 
-    if (track->audio.samplerate == 8000) {
+    trust_default_duration = track->default_duration != 0;
+    if (track->audio.samplerate == 8000 && trust_default_duration) {
         // If this is needed for more codecs, then add them here
         if (st->codecpar->codec_id == AV_CODEC_ID_AC3) {
             if (track->audio.samplerate != st->codecpar->sample_rate || !st->codecpar->frame_size)
