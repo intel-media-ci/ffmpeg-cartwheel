@@ -640,6 +640,9 @@ static int rtsp_listen(AVFormatContext *s)
     int ret;
     enum RTSPMethod methodcode;
 
+    if (!ff_network_init())
+        return AVERROR(EIO);
+
     /* extract hostname and port */
     av_url_split(proto, sizeof(proto), auth, sizeof(auth), host, sizeof(host),
                  &port, path, sizeof(path), s->url);
@@ -664,19 +667,19 @@ static int rtsp_listen(AVFormatContext *s)
                                    &s->interrupt_callback, NULL,
                                    s->protocol_whitelist, s->protocol_blacklist, NULL)) {
         av_log(s, AV_LOG_ERROR, "Unable to open RTSP for listening\n");
-        return ret;
+        goto fail;
     }
     rt->state       = RTSP_STATE_IDLE;
     rt->rtsp_hd_out = rt->rtsp_hd;
     for (;;) { /* Wait for incoming RTSP messages */
         ret = read_line(s, rbuf, sizeof(rbuf), &rbuflen);
         if (ret < 0)
-            return ret;
+            goto fail;
         ret = parse_command_line(s, rbuf, rbuflen, uri, sizeof(uri), method,
                                  sizeof(method), &methodcode);
         if (ret) {
             av_log(s, AV_LOG_ERROR, "RTSP: Unexpected Command\n");
-            return ret;
+            goto fail;
         }
 
         if (methodcode == ANNOUNCE) {
@@ -691,10 +694,15 @@ static int rtsp_listen(AVFormatContext *s)
         } else if (methodcode == SETUP)
             ret = rtsp_read_setup(s, host, uri);
         if (ret) {
-            ffurl_close(rt->rtsp_hd);
-            return AVERROR_INVALIDDATA;
+            ret = AVERROR_INVALIDDATA;
+            goto fail;
         }
     }
+fail:
+    ff_rtsp_close_streams(s);
+    ff_rtsp_close_connections(s);
+    ff_network_close();
+    return ret;
 }
 
 static int rtsp_probe(const AVProbeData *p)
@@ -727,22 +735,26 @@ static int rtsp_read_header(AVFormatContext *s)
 
         rt->real_setup_cache = !s->nb_streams ? NULL :
             av_mallocz_array(s->nb_streams, 2 * sizeof(*rt->real_setup_cache));
-        if (!rt->real_setup_cache && s->nb_streams)
-            return AVERROR(ENOMEM);
+        if (!rt->real_setup_cache && s->nb_streams) {
+            ret = AVERROR(ENOMEM);
+            goto fail;
+        }
         rt->real_setup = rt->real_setup_cache + s->nb_streams;
 
         if (rt->initial_pause) {
             /* do not start immediately */
         } else {
-            if ((ret = rtsp_read_play(s)) < 0) {
-                ff_rtsp_close_streams(s);
-                ff_rtsp_close_connections(s);
-                return ret;
-            }
+            ret = rtsp_read_play(s);
+            if (ret < 0)
+                goto fail;
         }
     }
 
     return 0;
+
+fail:
+    rtsp_read_close(s);
+    return ret;
 }
 
 int ff_rtsp_tcp_read_packet(AVFormatContext *s, RTSPStream **prtsp_st,
