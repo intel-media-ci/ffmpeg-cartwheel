@@ -523,7 +523,21 @@ The filter accepts the following options:
 Set split frequencies. Those must be positive and increasing.
 
 @item order
-Set filter order, can be @var{2nd}, @var{4th} or @var{8th}.
+Set filter order. Availabe values are:
+
+@table @samp
+@item 2nd
+@item 4th
+@item 6th
+@item 8th
+@item 10th
+@item 12th
+@item 14th
+@item 16th
+@item 18th
+@item 20th
+@end table
+
 Default is @var{4th}.
 @end table
 
@@ -1824,7 +1838,7 @@ Set central frequency for band.
 If input doesn't have that frequency the entry is ignored.
 
 @item w
-Set band width in hertz.
+Set band width in Hertz.
 
 @item g
 Set band gain in dB.
@@ -1889,7 +1903,7 @@ Syntax for the commands is : "@var{fN}|f=@var{freq}|w=@var{width}|g=@var{gain}"
 @var{fN} is existing filter number, starting from 0, if no such filter is available
 error is returned.
 @var{freq} set new frequency parameter.
-@var{width} set new width parameter in herz.
+@var{width} set new width parameter in Hertz.
 @var{gain} set new gain parameter in dB.
 
 Full filter invocation with asendcmd may look like this:
@@ -2570,7 +2584,7 @@ Set delay line feedback gain value. Allowed range is from 0 to 1.
 Default value is 0.5.
 
 @item cutoff
-Set cutoff frequency in herz. Allowed range is 50 to 900.
+Set cutoff frequency in Hertz. Allowed range is 50 to 900.
 Default value is 100.
 
 @item slope
@@ -2580,6 +2594,21 @@ Default value is 0.5.
 @item delay
 Set delay. Allowed range is from 1 to 100.
 Default value is 20.
+@end table
+
+@subsection Commands
+
+This filter supports the all above options as @ref{commands}.
+
+@section asupercut
+Cut super frequencies.
+
+The filter accepts the following options:
+
+@table @option
+@item cutoff
+Set cutoff frequency in Hertz. Allowed range is 20000 to 192000.
+Default value is 20000.
 @end table
 
 @subsection Commands
@@ -14813,7 +14842,7 @@ testsrc=s=100x100, split=4 [in0][in1][in2][in3];
 
 Overlay one video on top of another.
 
-This is the CUDA cariant of the @ref{overlay} filter.
+This is the CUDA variant of the @ref{overlay} filter.
 It only accepts CUDA frames. The underlying input pixel formats have to match.
 
 It takes two inputs and has one output. The first input is the "main"
