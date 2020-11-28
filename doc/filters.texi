@@ -523,7 +523,7 @@ The filter accepts the following options:
 Set split frequencies. Those must be positive and increasing.
 
 @item order
-Set filter order. Availabe values are:
+Set filter order. Available values are:
 
 @table @samp
 @item 2nd
@@ -539,6 +539,9 @@ Set filter order. Availabe values are:
 @end table
 
 Default is @var{4th}.
+
+@item level
+Set input gain level. Allowed range is from 0 to 1. Default value is 1.
 @end table
 
 @subsection Examples
@@ -554,13 +557,13 @@ ffmpeg -i in.flac -filter_complex 'acrossover=split=1500[LOW][HIGH]' -map '[LOW]
 @item
 Same as above, but with higher filter order:
 @example
-ffmpeg -i in.flac -filter_complex 'acrossover=split=1500:order=4th[LOW][HIGH]' -map '[LOW]' low.wav -map '[HIGH]' high.wav
+ffmpeg -i in.flac -filter_complex 'acrossover=split=1500:order=8th[LOW][HIGH]' -map '[LOW]' low.wav -map '[HIGH]' high.wav
 @end example
 
 @item
 Same as above, but also with additional middle band (frequencies between 1500 and 8000):
 @example
-ffmpeg -i in.flac -filter_complex 'acrossover=split=1500 8000:order=4th[LOW][MID][HIGH]' -map '[LOW]' low.wav -map '[MID]' mid.wav -map '[HIGH]' high.wav
+ffmpeg -i in.flac -filter_complex 'acrossover=split=1500 8000:order=8th[LOW][MID][HIGH]' -map '[LOW]' low.wav -map '[MID]' mid.wav -map '[HIGH]' high.wav
 @end example
 @end itemize
 
@@ -771,6 +774,8 @@ adelay=delays=64S:all=1
 @section adenorm
 Remedy denormals in audio by adding extremely low-level noise.
 
+This filter shall be placed before any filter that can produce denormals.
+
 A description of the accepted parameters follows.
 
 @table @option
@@ -910,6 +915,10 @@ select 50µs (FM-KF).
 select 75µs (FM-KF).
 @end table
 @end table
+
+@subsection Commands
+
+This filter supports the all above options as @ref{commands}.
 
 @section aeval
 
@@ -6801,7 +6810,7 @@ Alternatively can be set to @code{s} serial.
 
 Parallel can be faster then serial, while other way around is never true.
 Parallel will abort early on first change being greater then thresholds, while serial
-will continue processing other side of frames if they are equal or bellow thresholds.
+will continue processing other side of frames if they are equal or below thresholds.
 @end table
 
 @subsection Commands

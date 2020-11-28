@@ -274,6 +274,17 @@ static int rtsp_read_setup(AVFormatContext *s, char* host, char *controlurl)
     rtsp_st   = rt->rtsp_streams[streamid];
     localport = rt->rtp_port_min;
 
+    /* check if the stream has already been setup */
+    if (rtsp_st->transport_priv) {
+        if (CONFIG_RTPDEC && rt->transport == RTSP_TRANSPORT_RDT)
+            ff_rdt_parse_close(rtsp_st->transport_priv);
+        else if (CONFIG_RTPDEC && rt->transport == RTSP_TRANSPORT_RTP)
+            ff_rtp_parse_close(rtsp_st->transport_priv);
+        rtsp_st->transport_priv = NULL;
+    }
+    if (rtsp_st->rtp_handle)
+        ffurl_closep(&rtsp_st->rtp_handle);
+
     if (request.transports[0].lower_transport == RTSP_LOWER_TRANSPORT_TCP) {
         rt->lower_transport = RTSP_LOWER_TRANSPORT_TCP;
         if ((ret = ff_rtsp_open_transport_ctx(s, rtsp_st))) {
@@ -474,6 +485,7 @@ int ff_rtsp_parse_streaming_commands(AVFormatContext *s)
     ret = read_line(s, rbuf, sizeof(rbuf), &rbuflen);
     if (ret < 0)
         return ret;
+    av_log(s, AV_LOG_TRACE, "Parsing[%d]: %s\n", rbuflen, rbuf);
     ret = parse_command_line(s, rbuf, rbuflen, uri, sizeof(uri), method,
                              sizeof(method), &methodcode);
     if (ret) {
@@ -675,6 +687,7 @@ static int rtsp_listen(AVFormatContext *s)
         ret = read_line(s, rbuf, sizeof(rbuf), &rbuflen);
         if (ret < 0)
             goto fail;
+        av_log(s, AV_LOG_TRACE, "Parsing[%d]: %s\n", rbuflen, rbuf);
         ret = parse_command_line(s, rbuf, rbuflen, uri, sizeof(uri), method,
                                  sizeof(method), &methodcode);
         if (ret) {
