@@ -288,7 +288,25 @@ static void biquad_process_## name(const BiquadCoeffs *const c,\
     type z1 = b->z1;                                           \
     type z2 = b->z2;                                           \
                                                                \
-    for (int n = 0; n < nb_samples; n++) {                     \
+    for (int n = 0; n + 1 < nb_samples; n++) {                 \
+        type in = src[n];                                      \
+        type out;                                              \
+                                                               \
+        out = in * b0 + z1;                                    \
+        z1 = b1 * in + z2 + a1 * out;                          \
+        z2 = b2 * in + a2 * out;                               \
+        dst[n] = out;                                          \
+                                                               \
+        n++;                                                   \
+        in = src[n];                                           \
+        out = in * b0 + z1;                                    \
+        z1 = b1 * in + z2 + a1 * out;                          \
+        z2 = b2 * in + a2 * out;                               \
+        dst[n] = out;                                          \
+    }                                                          \
+                                                               \
+    if (nb_samples & 1) {                                      \
+        const int n = nb_samples - 1;                          \
         const type in = src[n];                                \
         type out;                                              \
                                                                \
@@ -320,8 +338,7 @@ static int filter_channels_## name(AVFilterContext *ctx, void *arg, int jobnr, i
         CrossoverChannel *xover = &s->xover[ch];                                            \
                                                                                             \
         s->fdsp->vector_## ff ##mul_scalar((type *)frames[0]->extended_data[ch], src,       \
-                                    s->level_in, nb_samples);                               \
-        emms_c();                                                                           \
+                                    s->level_in, FFALIGN(nb_samples, sizeof(type)));        \
                                                                                             \
         for (int band = 0; band < ctx->nb_outputs; band++) {                                \
             for (int f = 0; band + 1 < ctx->nb_outputs && f < s->filter_count; f++) {       \
@@ -367,9 +384,8 @@ static int filter_channels_## name(AVFilterContext *ctx, void *arg, int jobnr, i
         for (int band = 0; band < ctx->nb_outputs && s->first_order; band++) {              \
             if (band & 1) {                                                                 \
                 type *dst = (type *)frames[band]->extended_data[ch];                        \
-                                                                                            \
-                for (int n = 0; n < nb_samples; n++)                                        \
-                    dst[n] *= -one;                                                         \
+                s->fdsp->vector_## ff ##mul_scalar(dst, dst, -one,                          \
+                                                   FFALIGN(nb_samples, sizeof(type)));      \
             }                                                                               \
         }                                                                                   \
     }                                                                                       \
