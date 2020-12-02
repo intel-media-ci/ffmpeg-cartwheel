@@ -1,4 +1,4 @@
-From 348eb030fc206bd2b029ef943064865f9b2584dd Mon Sep 17 00:00:00 2001
+From ef1a8fed12b297b968acdff46278813c2439f820 Mon Sep 17 00:00:00 2001
 From: Fei Wang <fei.w.wang@intel.com>
 Date: Wed, 25 Nov 2020 13:48:35 -0500
 Subject: [PATCH] lavc/vaapi_encode_h265: set low delay B automatically
@@ -8,12 +8,12 @@ P frame to forward prediction B.
 
 Signed-off-by: Fei Wang <fei.w.wang@intel.com>
 ---
- libavcodec/vaapi_encode.c      | 30 +++++++++++++++++++++++++++---
- libavcodec/vaapi_encode_h265.c | 23 +++++------------------
- 2 files changed, 32 insertions(+), 21 deletions(-)
+ libavcodec/vaapi_encode.c      | 28 ++++++++++++++++++++++++++--
+ libavcodec/vaapi_encode_h265.c | 25 +++++--------------------
+ 2 files changed, 31 insertions(+), 22 deletions(-)
 
 diff --git a/libavcodec/vaapi_encode.c b/libavcodec/vaapi_encode.c
-index f561feb38d..2a5be3753b 100644
+index f561feb38d..b91556b38a 100644
 --- a/libavcodec/vaapi_encode.c
 +++ b/libavcodec/vaapi_encode.c
 @@ -1907,6 +1907,30 @@ static av_cold int vaapi_encode_init_gop_structure(AVCodecContext *avctx)
@@ -21,7 +21,7 @@ index f561feb38d..2a5be3753b 100644
      }
  
 +#if VA_CHECK_VERSION(1, 9, 0)
-+    // if driver doesn't support P frame, convert P to forward-prediction B. and keep
++    // if driver doesn't support P frame, convert P to forward-prediction B.
 +    // if driver doesn't support future prediction type, convert B to forward-prediction B.
 +    if (!ctx->b_frame_strategy) {
 +        attr = (VAConfigAttrib) { VAConfigAttribPredictionDirection };
@@ -47,40 +47,39 @@ index f561feb38d..2a5be3753b 100644
      if (ctx->codec->flags & FLAG_INTRA_ONLY ||
          avctx->gop_size <= 1) {
          av_log(avctx, AV_LOG_VERBOSE, "Using intra frames only.\n");
-@@ -1919,7 +1943,7 @@ static av_cold int vaapi_encode_init_gop_structure(AVCodecContext *avctx)
+@@ -1918,7 +1942,7 @@ static av_cold int vaapi_encode_init_gop_structure(AVCodecContext *avctx)
+     } else if (!(ctx->codec->flags & FLAG_B_PICTURES) ||
                 ref_l1 < 1 || avctx->max_b_frames < 1 ||
                 ctx->b_frame_strategy == 1) {
-         if (ctx->b_frame_strategy == 1)
--            av_log(avctx, AV_LOG_VERBOSE, "Using intra and low delay "
-+            av_log(avctx, AV_LOG_VERBOSE, "Using intra and forward-prediction "
+-        if (ctx->b_frame_strategy == 1)
++        if (ctx->b_frame_strategy)
+             av_log(avctx, AV_LOG_VERBOSE, "Using intra and low delay "
                     "B-frames (supported references: %d / %d).\n",
                     ref_l0, ref_l1);
-         else
-@@ -1930,8 +1954,8 @@ static av_cold int vaapi_encode_init_gop_structure(AVCodecContext *avctx)
+@@ -1929,7 +1953,7 @@ static av_cold int vaapi_encode_init_gop_structure(AVCodecContext *avctx)
+         ctx->p_per_i  = INT_MAX;
          ctx->b_per_p  = 0;
      } else {
-         if (ctx->b_frame_strategy == 2)
--            av_log(avctx, AV_LOG_VERBOSE, "Using intra, reference B- and "
--                   "B-frames (supported references: %d / %d).\n",
-+            av_log(avctx, AV_LOG_VERBOSE, "Using intra, forward-prediction "
-+                   "B- and B-frames (supported references: %d / %d).\n",
+-        if (ctx->b_frame_strategy == 2)
++        if (ctx->b_frame_strategy)
+             av_log(avctx, AV_LOG_VERBOSE, "Using intra, reference B- and "
+                    "B-frames (supported references: %d / %d).\n",
                     ref_l0, ref_l1);
-         else
-             av_log(avctx, AV_LOG_VERBOSE, "Using intra, P- and B-frames "
 diff --git a/libavcodec/vaapi_encode_h265.c b/libavcodec/vaapi_encode_h265.c
-index 45f233cdea..e3eaeb61c3 100644
+index 45f233cdea..aadc43e6ca 100644
 --- a/libavcodec/vaapi_encode_h265.c
 +++ b/libavcodec/vaapi_encode_h265.c
-@@ -951,7 +951,7 @@ static int vaapi_encode_h265_init_slice_params(AVCodecContext *avctx,
+@@ -950,8 +950,7 @@ static int vaapi_encode_h265_init_slice_params(AVCodecContext *avctx,
+ 
      sh->slice_type = hpic->slice_type;
  
-     // driver requires low delay B frame in low power mode
+-    // driver requires low delay B frame in low power mode
 -    if (sh->slice_type == HEVC_SLICE_P && priv->b_frame_strategy)
 +    if (sh->slice_type == HEVC_SLICE_P && ctx->b_frame_strategy)
          sh->slice_type = HEVC_SLICE_B;
  
      sh->slice_pic_order_cnt_lsb = hpic->pic_order_cnt &
-@@ -1120,7 +1120,7 @@ static int vaapi_encode_h265_init_slice_params(AVCodecContext *avctx,
+@@ -1120,7 +1119,7 @@ static int vaapi_encode_h265_init_slice_params(AVCodecContext *avctx,
          av_assert0(pic->type == PICTURE_TYPE_P ||
                     pic->type == PICTURE_TYPE_B);
          vslice->ref_pic_list0[0] = vpic->reference_frames[0];
@@ -89,16 +88,17 @@ index 45f233cdea..e3eaeb61c3 100644
              // Reference for low delay B-frame, L0 == L1
              vslice->ref_pic_list1[0] = vpic->reference_frames[0];
      }
-@@ -1132,7 +1132,7 @@ static int vaapi_encode_h265_init_slice_params(AVCodecContext *avctx,
+@@ -1131,8 +1130,7 @@ static int vaapi_encode_h265_init_slice_params(AVCodecContext *avctx,
+     }
  
      // Driver requires low delay B frame and matched ref_pic_list0/1[]
-     // for low power mode
+-    // for low power mode
 -    if (pic->type == PICTURE_TYPE_P && ctx->low_power) {
 +    if (pic->type == PICTURE_TYPE_P && ctx->b_frame_strategy) {
          vslice->slice_type = HEVC_SLICE_B;
          for (i = 0; i < FF_ARRAY_ELEMS(vslice->ref_pic_list0); i++) {
              vslice->ref_pic_list1[i].picture_id = vslice->ref_pic_list0[i].picture_id;
-@@ -1279,20 +1279,7 @@ static av_cold int vaapi_encode_h265_init(AVCodecContext *avctx)
+@@ -1279,20 +1277,7 @@ static av_cold int vaapi_encode_h265_init(AVCodecContext *avctx)
      if (priv->qp > 0)
          ctx->explicit_qp = priv->qp;
  
@@ -120,7 +120,7 @@ index 45f233cdea..e3eaeb61c3 100644
  
      return ff_vaapi_encode_init(avctx);
  }
-@@ -1372,7 +1359,7 @@ static const AVOption vaapi_encode_h265_options[] = {
+@@ -1372,7 +1357,7 @@ static const AVOption vaapi_encode_h265_options[] = {
        INT_MIN, INT_MAX, FLAGS, "sei" },
      { "b_strategy", "Strategy to choose between I/P/B-frames",
        OFFSET(b_frame_strategy), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 2, FLAGS, "b_strategy" },
