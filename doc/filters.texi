@@ -1419,11 +1419,15 @@ The filter accepts the following options:
 @item shift
 Specify frequency shift. Allowed range is -INT_MAX to INT_MAX.
 Default value is 0.0.
+
+@item level
+Set output gain applied to final output. Allowed range is from -1.0 to 1.0.
+Default value is 1.0.
 @end table
 
 @subsection Commands
 
-This filter supports the above option as @ref{commands}.
+This filter supports the all above options as @ref{commands}.
 
 @section agate
 
@@ -2182,11 +2186,15 @@ The filter accepts the following options:
 @item shift
 Specify phase shift. Allowed range is from -1.0 to 1.0.
 Default value is 0.0.
+
+@item level
+Set output gain applied to final output. Allowed range is from -1.0 to 1.0.
+Default value is 1.0.
 @end table
 
 @subsection Commands
 
-This filter supports the above option as @ref{commands}.
+This filter supports the all above options as @ref{commands}.
 
 @section apulsator
 
@@ -2307,6 +2315,13 @@ This filter accepts the following options:
 @table @option
 @item model, m
 Set train model file to load. This option is always required.
+
+@item mix
+Set how much to mix filtered samples into final output.
+Allowed range is from -1 to 1. Default value is 1.
+Negative values are special, they set how much to keep filtered noise
+in the final filter output. Set this option to -1 to hear actual
+noise removed from input signal.
 @end table
 
 @section asetnsamples
@@ -2655,6 +2670,32 @@ Default value is 20.
 
 This filter supports the all above options as @ref{commands}.
 
+@section asubcut
+Cut subwoofer frequencies.
+
+This filter allows to set custom, steeper
+roll off than highpass filter, and thus is able to more attenuate
+frequency content in stop-band.
+
+The filter accepts the following options:
+
+@table @option
+@item cutoff
+Set cutoff frequency in Hertz. Allowed range is 2 to 200.
+Default value is 20.
+
+@item order
+Set filter order. Available values are from 3 to 20.
+Default value is 10.
+
+@item level
+Set input gain level. Allowed range is from 0 to 1. Default value is 1.
+@end table
+
+@subsection Commands
+
+This filter supports the all above options as @ref{commands}.
+
 @section asupercut
 Cut super frequencies.
 
@@ -2668,6 +2709,9 @@ Default value is 20000.
 @item order
 Set filter order. Available values are from 3 to 20.
 Default value is 10.
+
+@item level
+Set input gain level. Allowed range is from 0 to 1. Default value is 1.
 @end table
 
 @subsection Commands
@@ -5499,6 +5543,12 @@ Mid/Side to Left/Left.
 
 @item ms>rr
 Mid/Side to Right/Right.
+
+@item ms>rl
+Mid/Side to Right/Left.
+
+@item lr>l-r
+Left/Right to Left - Right.
 @end table
 
 @item slev
@@ -5547,6 +5597,10 @@ Similar as classic mode above but gain is raised up to 2.
 Equal power distribution, from -6dB to +6dB range.
 @end table
 @end table
+
+@subsection Commands
+
+This filter supports the all above options as @ref{commands}.
 
 @subsection Examples
 
