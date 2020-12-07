@@ -207,6 +207,34 @@ static int decode_nal_sei_user_data_unregistered(HEVCSEIUnregistered *s, GetBitC
     return 0;
 }
 
+static int decode_registered_user_data_dynamic_hdr_plus(HEVCSEIDynamicHDRPlus *s,
+                                                        GetBitContext *gb, int size)
+{
+    size_t meta_size;
+    int err;
+    AVDynamicHDRPlus *metadata = av_dynamic_hdr_plus_alloc(&meta_size);
+    if (!metadata)
+        return AVERROR(ENOMEM);
+
+    err = ff_parse_itu_t_t35_to_dynamic_hdr10_plus(metadata,
+                                                   gb->buffer + get_bits_count(gb) / 8, size);
+    if (err < 0) {
+        av_free(metadata);
+        return err;
+    }
+
+    av_buffer_unref(&s->info);
+    s->info = av_buffer_create((uint8_t *)metadata, meta_size, NULL, NULL, 0);
+    if (!s->info) {
+        av_free(metadata);
+        return AVERROR(ENOMEM);
+    }
+
+    skip_bits_long(gb, size * 8);
+
+    return 0;
+}
+
 static int decode_nal_sei_user_data_registered_itu_t_t35(HEVCSEI *s, GetBitContext *gb,
                                                          int size)
 {
@@ -216,9 +244,9 @@ static int decode_nal_sei_user_data_registered_itu_t_t35(HEVCSEI *s, GetBitConte
     uint8_t country_code = 0;
     uint16_t provider_code = 0;
 
-    if (size < 7)
+    if (size < 3)
         return AVERROR(EINVAL);
-    size -= 7;
+    size -= 3;
 
     country_code = get_bits(gb, 8);
     if (country_code == 0xFF) {
@@ -233,34 +261,27 @@ static int decode_nal_sei_user_data_registered_itu_t_t35(HEVCSEI *s, GetBitConte
         // A/341 Amendment - 2094-40
         const uint16_t smpte2094_40_provider_oriented_code = 0x0001;
         const uint8_t smpte2094_40_application_identifier = 0x04;
+        uint16_t provider_oriented_code;
+        uint8_t application_identifier;
 
-        uint16_t provider_oriented_code = get_bits(gb, 16);
-        uint8_t application_identifier = get_bits(gb, 8);
+        if (size < 3)
+            return AVERROR(EINVAL);
+        size -= 3;
 
+        provider_oriented_code = get_bits(gb, 16);
+        application_identifier = get_bits(gb, 8);
         if (provider_oriented_code == smpte2094_40_provider_oriented_code &&
             application_identifier == smpte2094_40_application_identifier) {
-            int err = 0;
-            size_t meta_size = 0;
-            AVDynamicHDRPlus *metadata = av_dynamic_hdr_plus_alloc(&meta_size);
-            if (!metadata)
-                return AVERROR(ENOMEM);
-
-            err = ff_parse_itu_t_t35_to_dynamic_hdr10_plus(gb, metadata);
-            if (err < 0) {
-                av_free(metadata);
-                return err;
-            }
-
-            av_buffer_unref(&s->dynamic_hdr_plus.info);
-            s->dynamic_hdr_plus.info = av_buffer_create((uint8_t *)metadata,
-                                                        meta_size, NULL, NULL, 0);
-            if (!s->dynamic_hdr_plus.info) {
-                av_free(metadata);
-                return AVERROR(ENOMEM);
-            }
+            return decode_registered_user_data_dynamic_hdr_plus(&s->dynamic_hdr_plus, gb, size);
         }
     } else {
-        uint32_t user_identifier = get_bits_long(gb, 32);
+        uint32_t user_identifier;
+
+        if (size < 4)
+            return AVERROR(EINVAL);
+        size -= 4;
+
+        user_identifier = get_bits_long(gb, 32);
         switch (user_identifier) {
         case MKBETAG('G', 'A', '9', '4'):
             return decode_registered_user_data_closed_caption(&s->a53_caption, gb, size);
