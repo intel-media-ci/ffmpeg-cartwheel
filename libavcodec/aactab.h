@@ -92,16 +92,14 @@ static const INTFLOAT * const tns_tmp2_map[4] = {
  */
 DECLARE_ALIGNED(32, extern float,  ff_aac_kbd_long_1024)[1024];
 DECLARE_ALIGNED(32, extern float,  ff_aac_kbd_short_128)[128];
-DECLARE_ALIGNED(32, extern float,  ff_aac_kbd_long_960)[960];
-DECLARE_ALIGNED(32, extern float,  ff_aac_kbd_short_120)[120];
-DECLARE_ALIGNED(32, extern int,    ff_aac_kbd_long_1024_fixed)[1024];
-DECLARE_ALIGNED(32, extern int,    ff_aac_kbd_long_512_fixed)[512];
-DECLARE_ALIGNED(32, extern int,    ff_aac_kbd_short_128_fixed)[128];
 DECLARE_ALIGNED(32, extern const float, ff_aac_eld_window_512)[1920];
 DECLARE_ALIGNED(32, extern const int,   ff_aac_eld_window_512_fixed)[1920];
 DECLARE_ALIGNED(32, extern const float, ff_aac_eld_window_480)[1800];
 DECLARE_ALIGNED(32, extern const int,   ff_aac_eld_window_480_fixed)[1800];
 // @}
+
+/* Initializes data shared between float decoder and encoder. */
+void ff_aac_float_common_init(void);
 
 /* @name number of scalefactor window bands for long and short transform windows respectively
  * @{

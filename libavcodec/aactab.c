@@ -27,6 +27,7 @@
  * @author Maxim Gavrilov ( maxim.gavrilov gmail com )
  */
 
+#include "config.h"
 #include "libavutil/mem.h"
 #include "libavutil/thread.h"
 #include "aac.h"
@@ -37,12 +38,27 @@
 float ff_aac_pow2sf_tab[428];
 float ff_aac_pow34sf_tab[428];
 
+#if CONFIG_AAC_ENCODER || CONFIG_AAC_DECODER
+#include "kbdwin.h"
+#include "sinewin.h"
+
 DECLARE_ALIGNED(32, float,  ff_aac_kbd_long_1024)[1024];
 DECLARE_ALIGNED(32, float,  ff_aac_kbd_short_128)[128];
-DECLARE_ALIGNED(32, float,  ff_aac_kbd_long_960)[960];
-DECLARE_ALIGNED(32, float,  ff_aac_kbd_short_120)[120];
-DECLARE_ALIGNED(32, int,    ff_aac_kbd_long_1024_fixed)[1024];
-DECLARE_ALIGNED(32, int,    ff_aac_kbd_short_128_fixed)[128];
+
+static av_cold void aac_float_common_init(void)
+{
+    ff_kbd_window_init(ff_aac_kbd_long_1024, 4.0, 1024);
+    ff_kbd_window_init(ff_aac_kbd_short_128, 6.0, 128);
+    ff_init_ff_sine_windows(10);
+    ff_init_ff_sine_windows(7);
+}
+
+av_cold void ff_aac_float_common_init(void)
+{
+    static AVOnce init_static_once = AV_ONCE_INIT;
+    ff_thread_once(&init_static_once, aac_float_common_init);
+}
+#endif
 
 const uint8_t ff_aac_num_swb_1024[] = {
     41, 41, 47, 49, 49, 51, 47, 47, 43, 43, 43, 40, 40
