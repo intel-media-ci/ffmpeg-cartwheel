@@ -36,6 +36,7 @@
 #include "avcodec.h"
 #include "blockdsp.h"
 #include "copy_block.h"
+#include "decode.h"
 #include "hwconfig.h"
 #include "idctdsp.h"
 #include "internal.h"
@@ -158,6 +159,10 @@ av_cold int ff_mjpeg_decode_init(AVCodecContext *avctx)
         s->picture_ptr = s->picture;
     }
 
+    s->pkt = av_packet_alloc();
+    if (!s->pkt)
+        return AVERROR(ENOMEM);
+
     s->avctx = avctx;
     ff_blockdsp_init(&s->bdsp, avctx);
     ff_hpeldsp_init(&s->hdsp, avctx->flags);
@@ -193,7 +198,19 @@ av_cold int ff_mjpeg_decode_init(AVCodecContext *avctx)
             s->interlace_polarity = 1;
     }
 
-    if (   avctx->extradata_size > 8
+    if (avctx->codec_id == AV_CODEC_ID_SMVJPEG) {
+        if (avctx->extradata_size >= 4)
+            s->smv_frames_per_jpeg = AV_RL32(avctx->extradata);
+
+        if (s->smv_frames_per_jpeg <= 0) {
+            av_log(avctx, AV_LOG_ERROR, "Invalid number of frames per jpeg.\n");
+            return AVERROR_INVALIDDATA;
+        }
+
+        s->smv_frame = av_frame_alloc();
+        if (!s->smv_frame)
+            return AVERROR(ENOMEM);
+    } else if (avctx->extradata_size > 8
         && AV_RL32(avctx->extradata) == 0x2C
         && AV_RL32(avctx->extradata+4) == 0x18) {
         parse_avid(s, avctx->extradata, avctx->extradata_size);
@@ -465,6 +482,12 @@ int ff_mjpeg_decode_sof(MJpegDecodeContext *s)
         s->first_picture = 0;
     } else {
         size_change = 0;
+    }
+
+    if (s->avctx->codec_id == AV_CODEC_ID_SMVJPEG) {
+        s->avctx->height = s->avctx->coded_height / s->smv_frames_per_jpeg;
+        if (s->avctx->height <= 0)
+            return AVERROR_INVALIDDATA;
     }
 
     if (s->got_picture && s->interlaced && (s->bottom_field == !s->interlace_polarity)) {
@@ -2331,12 +2354,68 @@ static void reset_icc_profile(MJpegDecodeContext *s)
     s->iccnum  = 0;
 }
 
-int ff_mjpeg_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
-                          AVPacket *avpkt)
+// SMV JPEG just stacks several output frames into one JPEG picture
+// we handle that by setting up the cropping parameters appropriately
+static int smv_process_frame(AVCodecContext *avctx, AVFrame *frame)
 {
-    AVFrame     *frame = data;
-    const uint8_t *buf = avpkt->data;
-    int buf_size       = avpkt->size;
+    MJpegDecodeContext *s = avctx->priv_data;
+    int ret;
+
+    if (s->smv_next_frame > 0) {
+        av_assert0(s->smv_frame->buf[0]);
+        av_frame_unref(frame);
+        ret = av_frame_ref(frame, s->smv_frame);
+        if (ret < 0)
+            return ret;
+    } else {
+        av_assert0(frame->buf[0]);
+        av_frame_unref(s->smv_frame);
+        ret = av_frame_ref(s->smv_frame, frame);
+        if (ret < 0)
+            return ret;
+    }
+
+    av_assert0((s->smv_next_frame + 1) * avctx->height <= avctx->coded_height);
+
+    frame->width       = avctx->coded_width;
+    frame->height      = avctx->coded_height;
+    frame->crop_top    = FFMIN(s->smv_next_frame * avctx->height, frame->height);
+    frame->crop_bottom = frame->height - (s->smv_next_frame + 1) * avctx->height;
+
+    s->smv_next_frame = (s->smv_next_frame + 1) % s->smv_frames_per_jpeg;
+
+    if (s->smv_next_frame == 0)
+        av_frame_unref(s->smv_frame);
+
+    return 0;
+}
+
+static int mjpeg_get_packet(AVCodecContext *avctx)
+{
+    MJpegDecodeContext *s = avctx->priv_data;
+    int ret;
+
+    av_packet_unref(s->pkt);
+    ret = ff_decode_get_packet(avctx, s->pkt);
+    if (ret < 0)
+        return ret;
+
+#if CONFIG_SP5X_DECODER || CONFIG_AMV_DECODER
+    if (avctx->codec_id == AV_CODEC_ID_SP5X ||
+        avctx->codec_id == AV_CODEC_ID_AMV) {
+        ret = ff_sp5x_process_packet(avctx, s->pkt);
+        if (ret < 0)
+            return ret;
+    }
+#endif
+
+    s->buf_size = s->pkt->size;
+
+    return 0;
+}
+
+int ff_mjpeg_receive_frame(AVCodecContext *avctx, AVFrame *frame)
+{
     MJpegDecodeContext *s = avctx->priv_data;
     const uint8_t *buf_end, *buf_ptr;
     const uint8_t *unescaped_buf_ptr;
@@ -2347,7 +2426,8 @@ int ff_mjpeg_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
     int ret = 0;
     int is16bit;
 
-    s->buf_size = buf_size;
+    if (avctx->codec_id == AV_CODEC_ID_SMVJPEG && s->smv_next_frame > 0)
+        return smv_process_frame(avctx, frame);
 
     av_dict_free(&s->exif_metadata);
     av_freep(&s->stereo3d);
@@ -2356,8 +2436,12 @@ int ff_mjpeg_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
     if (s->iccnum != 0)
         reset_icc_profile(s);
 
-    buf_ptr = buf;
-    buf_end = buf + buf_size;
+    ret = mjpeg_get_packet(avctx);
+    if (ret < 0)
+        return ret;
+
+    buf_ptr = s->pkt->data;
+    buf_end = s->pkt->data + s->pkt->size;
     while (buf_ptr < buf_end) {
         /* find start next marker */
         start_code = ff_mjpeg_find_marker(s, &buf_ptr, buf_end,
@@ -2369,7 +2453,7 @@ int ff_mjpeg_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
         } else if (unescaped_buf_size > INT_MAX / 8) {
             av_log(avctx, AV_LOG_ERROR,
                    "MJPEG packet 0x%x too big (%d/%d), corrupt data?\n",
-                   start_code, unescaped_buf_size, buf_size);
+                   start_code, unescaped_buf_size, s->pkt->size);
             return AVERROR_INVALIDDATA;
         }
         av_log(avctx, AV_LOG_DEBUG, "marker=%x avail_size_in_buf=%"PTRDIFF_SPECIFIER"\n",
@@ -2506,6 +2590,7 @@ eoi_parser:
             }
             if (avctx->skip_frame == AVDISCARD_ALL) {
                 s->got_picture = 0;
+                ret = AVERROR(EAGAIN);
                 goto the_end_no_picture;
             }
             if (s->avctx->hwaccel) {
@@ -2517,8 +2602,10 @@ eoi_parser:
             }
             if ((ret = av_frame_ref(frame, s->picture_ptr)) < 0)
                 return ret;
-            *got_frame = 1;
             s->got_picture = 0;
+
+            frame->pkt_dts = s->pkt->dts;
+            frame->best_effort_timestamp = s->pkt->pts;
 
             if (!s->lossless) {
                 int qp = FFMAX3(s->qscale[0],
@@ -2528,7 +2615,7 @@ eoi_parser:
                 AVBufferRef *qp_table_buf = av_buffer_alloc(qpw);
                 if (qp_table_buf) {
                     memset(qp_table_buf->data, qp, qpw);
-                    av_frame_set_qp_table(data, qp_table_buf, 0, FF_QSCALE_TYPE_MPEG1);
+                    av_frame_set_qp_table(frame, qp_table_buf, 0, FF_QSCALE_TYPE_MPEG1);
                 }
 
                 if(avctx->debug & FF_DEBUG_QP)
@@ -2769,7 +2856,7 @@ the_end:
     }
 
     if (s->stereo3d) {
-        AVStereo3D *stereo = av_stereo3d_create_side_data(data);
+        AVStereo3D *stereo = av_stereo3d_create_side_data(frame);
         if (stereo) {
             stereo->type  = s->stereo3d->type;
             stereo->flags = s->stereo3d->flags;
@@ -2787,7 +2874,7 @@ the_end:
         for (i = 0; i < s->iccnum; i++)
             total_size += s->iccdatalens[i];
 
-        sd = av_frame_new_side_data(data, AV_FRAME_DATA_ICC_PROFILE, total_size);
+        sd = av_frame_new_side_data(frame, AV_FRAME_DATA_ICC_PROFILE, total_size);
         if (!sd) {
             av_log(s->avctx, AV_LOG_ERROR, "Could not allocate frame side data\n");
             return AVERROR(ENOMEM);
@@ -2800,14 +2887,24 @@ the_end:
         }
     }
 
-    av_dict_copy(&((AVFrame *) data)->metadata, s->exif_metadata, 0);
+    av_dict_copy(&frame->metadata, s->exif_metadata, 0);
     av_dict_free(&s->exif_metadata);
+
+    if (avctx->codec_id == AV_CODEC_ID_SMVJPEG) {
+        ret = smv_process_frame(avctx, frame);
+        if (ret < 0) {
+            av_frame_unref(frame);
+            return ret;
+        }
+    }
+
+    ret = 0;
 
 the_end_no_picture:
     av_log(avctx, AV_LOG_DEBUG, "decode frame unused %"PTRDIFF_SPECIFIER" bytes\n",
            buf_end - buf_ptr);
-//  return buf_end - buf_ptr;
-    return buf_ptr - buf;
+
+    return ret;
 }
 
 /* mxpeg may call the following function (with a blank MJpegDecodeContext)
@@ -2826,6 +2923,10 @@ av_cold int ff_mjpeg_decode_end(AVCodecContext *avctx)
         s->picture_ptr = NULL;
     } else if (s->picture_ptr)
         av_frame_unref(s->picture_ptr);
+
+    av_packet_free(&s->pkt);
+
+    av_frame_free(&s->smv_frame);
 
     av_freep(&s->buffer);
     av_freep(&s->stereo3d);
@@ -2853,6 +2954,9 @@ static void decode_flush(AVCodecContext *avctx)
 {
     MJpegDecodeContext *s = avctx->priv_data;
     s->got_picture = 0;
+
+    s->smv_next_frame = 0;
+    av_frame_unref(s->smv_frame);
 }
 
 #if CONFIG_MJPEG_DECODER
@@ -2879,14 +2983,14 @@ AVCodec ff_mjpeg_decoder = {
     .priv_data_size = sizeof(MJpegDecodeContext),
     .init           = ff_mjpeg_decode_init,
     .close          = ff_mjpeg_decode_end,
-    .decode         = ff_mjpeg_decode_frame,
+    .receive_frame  = ff_mjpeg_receive_frame,
     .flush          = decode_flush,
     .capabilities   = AV_CODEC_CAP_DR1,
     .max_lowres     = 3,
     .priv_class     = &mjpegdec_class,
     .profiles       = NULL_IF_CONFIG_SMALL(ff_mjpeg_profiles),
     .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP |
-                      FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM,
+                      FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM | FF_CODEC_CAP_SETS_PKT_DTS,
     .hw_configs     = (const AVCodecHWConfigInternal*[]) {
 #if CONFIG_MJPEG_NVDEC_HWACCEL
                         HWACCEL_NVDEC(mjpeg),
@@ -2907,10 +3011,28 @@ AVCodec ff_thp_decoder = {
     .priv_data_size = sizeof(MJpegDecodeContext),
     .init           = ff_mjpeg_decode_init,
     .close          = ff_mjpeg_decode_end,
-    .decode         = ff_mjpeg_decode_frame,
+    .receive_frame  = ff_mjpeg_receive_frame,
     .flush          = decode_flush,
     .capabilities   = AV_CODEC_CAP_DR1,
     .max_lowres     = 3,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP |
+                      FF_CODEC_CAP_SETS_PKT_DTS,
+};
+#endif
+
+#if CONFIG_SMVJPEG_DECODER
+AVCodec ff_smvjpeg_decoder = {
+    .name           = "smvjpeg",
+    .long_name      = NULL_IF_CONFIG_SMALL("SMV JPEG"),
+    .type           = AVMEDIA_TYPE_VIDEO,
+    .id             = AV_CODEC_ID_SMVJPEG,
+    .priv_data_size = sizeof(MJpegDecodeContext),
+    .init           = ff_mjpeg_decode_init,
+    .close          = ff_mjpeg_decode_end,
+    .receive_frame  = ff_mjpeg_receive_frame,
+    .flush          = decode_flush,
+    .capabilities   = AV_CODEC_CAP_DR1,
+    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_EXPORTS_CROPPING |
+                      FF_CODEC_CAP_SETS_PKT_DTS,
 };
 #endif

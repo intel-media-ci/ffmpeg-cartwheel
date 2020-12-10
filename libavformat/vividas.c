@@ -373,6 +373,8 @@ static int track_header(VividasDemuxContext *viv, AVFormatContext *s,  uint8_t *
         avio_rl16(pb); //codec_subid
         st->codecpar->channels = avio_rl16(pb); // channels
         st->codecpar->sample_rate = avio_rl32(pb); // sample_rate
+        if (st->codecpar->sample_rate <= 0)
+            return AVERROR_INVALIDDATA;
         avio_seek(pb, 10, SEEK_CUR); // data_1
         q = avio_r8(pb);
         avio_seek(pb, q, SEEK_CUR); // data_2
@@ -389,8 +391,8 @@ static int track_header(VividasDemuxContext *viv, AVFormatContext *s,  uint8_t *
             ffio_read_varlen(pb); // len_3
             num_data = avio_r8(pb);
             for (j = 0; j < num_data; j++) {
-                uint64_t len = ffio_read_varlen(pb);
-                if (len > INT_MAX/2 - xd_size) {
+                int64_t len = ffio_read_varlen(pb);
+                if (len < 0 || len > INT_MAX/2 - xd_size) {
                     return AVERROR_INVALIDDATA;
                 }
                 data_len[j] = len;
