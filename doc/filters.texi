@@ -2733,6 +2733,56 @@ Set input gain level. Allowed range is from 0 to 1. Default value is 1.
 
 This filter supports the all above options as @ref{commands}.
 
+@section asuperpass
+Apply high order Butterworth band-pass filter.
+
+The filter accepts the following options:
+
+@table @option
+@item centerf
+Set center frequency in Hertz. Allowed range is 2 to 999999.
+Default value is 1000.
+
+@item order
+Set filter order. Available values are from 4 to 20.
+Default value is 4.
+
+@item qfactor
+Set Q-factor. Allowed range is from 0.01 to 100. Default value is 1.
+
+@item level
+Set input gain level. Allowed range is from 0 to 2. Default value is 1.
+@end table
+
+@subsection Commands
+
+This filter supports the all above options as @ref{commands}.
+
+@section asuperstop
+Apply high order Butterworth band-stop filter.
+
+The filter accepts the following options:
+
+@table @option
+@item centerf
+Set center frequency in Hertz. Allowed range is 2 to 999999.
+Default value is 1000.
+
+@item order
+Set filter order. Available values are from 4 to 20.
+Default value is 4.
+
+@item qfactor
+Set Q-factor. Allowed range is from 0.01 to 100. Default value is 1.
+
+@item level
+Set input gain level. Allowed range is from 0 to 2. Default value is 1.
+@end table
+
+@subsection Commands
+
+This filter supports the all above options as @ref{commands}.
+
 @section atempo
 
 Adjust audio tempo.
@@ -7692,7 +7742,7 @@ The filter accepts the following options:
 @table @option
 @item thres
 Set threshold for averaging chrominance values.
-Sum of absolute difference of U and V pixel components or current
+Sum of absolute difference of Y, U and V pixel components of current
 pixel and neighbour pixels lower than this threshold will be used in
 averaging. Luma component is left unchanged and is copied to output.
 Default value is 30. Allowed range is from 1 to 200.
@@ -7714,6 +7764,24 @@ Mostly useful to speed-up filtering.
 Set vertical step when averaging. Default value is 1.
 Allowed range is from 1 to 50.
 Mostly useful to speed-up filtering.
+
+@item threy
+Set Y threshold for averaging chrominance values.
+Set finer control for max allowed difference between Y components
+of current pixel and neigbour pixels.
+Default value is 200. Allowed range is from 1 to 200.
+
+@item threu
+Set U threshold for averaging chrominance values.
+Set finer control for max allowed difference between U components
+of current pixel and neigbour pixels.
+Default value is 200. Allowed range is from 1 to 200.
+
+@item threv
+Set V threshold for averaging chrominance values.
+Set finer control for max allowed difference between V components
+of current pixel and neigbour pixels.
+Default value is 200. Allowed range is from 1 to 200.
 @end table
 
 @subsection Commands
@@ -8475,6 +8543,10 @@ Useful for making the overall image brighter or darker. Default is 0.0.
 Set matrix mode for each plane. Can be @var{square}, @var{row} or @var{column}.
 Default is @var{square}.
 @end table
+
+@subsection Commands
+
+This filter supports the all above options as @ref{commands}.
 
 @subsection Examples
 
@@ -15879,6 +15951,10 @@ Set value which will be multiplied with filtered result.
 Set value which will be added to filtered result.
 @end table
 
+@subsection Commands
+
+This filter supports the all above options as @ref{commands}.
+
 @section pseudocolor
 
 Alter frame colors in video with pseudocolors.
@@ -16470,6 +16546,10 @@ Set value which will be multiplied with filtered result.
 @item delta
 Set value which will be added to filtered result.
 @end table
+
+@subsection Commands
+
+This filter supports the all above options as @ref{commands}.
 
 @section rotate
 
@@ -18056,6 +18136,10 @@ Set value which will be multiplied with filtered result.
 @item delta
 Set value which will be added to filtered result.
 @end table
+
+@subsection Commands
+
+This filter supports the all above options as @ref{commands}.
 
 @anchor{spp}
 @section spp
