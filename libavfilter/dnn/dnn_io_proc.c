@@ -41,6 +41,13 @@ DNNReturnType proc_from_dnn_to_frame(AVFrame *frame, DNNData *output, void *log_
                                  frame->height,
                                  AV_PIX_FMT_GRAY8,
                                  0, NULL, NULL, NULL);
+        if (!sws_ctx) {
+            av_log(log_ctx, AV_LOG_ERROR, "Impossible to create scale context for the conversion "
+                "fmt:%s s:%dx%d -> fmt:%s s:%dx%d\n",
+                av_get_pix_fmt_name(AV_PIX_FMT_GRAYF32), frame->width * 3, frame->height,
+                av_get_pix_fmt_name(AV_PIX_FMT_GRAY8),   frame->width * 3, frame->height);
+            return DNN_ERROR;
+        }
         sws_scale(sws_ctx, (const uint8_t *[4]){(const uint8_t *)output->data, 0, 0, 0},
                            (const int[4]){frame->width * 3 * sizeof(float), 0, 0, 0}, 0, frame->height,
                            (uint8_t * const*)frame->data, frame->linesize);
@@ -64,13 +71,21 @@ DNNReturnType proc_from_dnn_to_frame(AVFrame *frame, DNNData *output, void *log_
                                  frame->height,
                                  AV_PIX_FMT_GRAY8,
                                  0, NULL, NULL, NULL);
+        if (!sws_ctx) {
+            av_log(log_ctx, AV_LOG_ERROR, "Impossible to create scale context for the conversion "
+                "fmt:%s s:%dx%d -> fmt:%s s:%dx%d\n",
+                av_get_pix_fmt_name(AV_PIX_FMT_GRAYF32), frame->width, frame->height,
+                av_get_pix_fmt_name(AV_PIX_FMT_GRAY8),   frame->width, frame->height);
+            return DNN_ERROR;
+        }
         sws_scale(sws_ctx, (const uint8_t *[4]){(const uint8_t *)output->data, 0, 0, 0},
                            (const int[4]){frame->width * sizeof(float), 0, 0, 0}, 0, frame->height,
                            (uint8_t * const*)frame->data, frame->linesize);
         sws_freeContext(sws_ctx);
         return DNN_SUCCESS;
     default:
-        av_log(log_ctx, AV_LOG_ERROR, "do not support frame format %d\n", frame->format);
+        av_log(log_ctx, AV_LOG_ERROR, "do not support frame format %s\n",
+               av_get_pix_fmt_name(frame->format));
         return DNN_ERROR;
     }
 
@@ -96,6 +111,13 @@ DNNReturnType proc_from_frame_to_dnn(AVFrame *frame, DNNData *input, void *log_c
                                  frame->height,
                                  AV_PIX_FMT_GRAYF32,
                                  0, NULL, NULL, NULL);
+        if (!sws_ctx) {
+            av_log(log_ctx, AV_LOG_ERROR, "Impossible to create scale context for the conversion "
+                "fmt:%s s:%dx%d -> fmt:%s s:%dx%d\n",
+                av_get_pix_fmt_name(AV_PIX_FMT_GRAY8),  frame->width * 3, frame->height,
+                av_get_pix_fmt_name(AV_PIX_FMT_GRAYF32),frame->width * 3, frame->height);
+            return DNN_ERROR;
+        }
         sws_scale(sws_ctx, (const uint8_t **)frame->data,
                            frame->linesize, 0, frame->height,
                            (uint8_t * const*)(&input->data),
@@ -120,6 +142,13 @@ DNNReturnType proc_from_frame_to_dnn(AVFrame *frame, DNNData *input, void *log_c
                                  frame->height,
                                  AV_PIX_FMT_GRAYF32,
                                  0, NULL, NULL, NULL);
+        if (!sws_ctx) {
+            av_log(log_ctx, AV_LOG_ERROR, "Impossible to create scale context for the conversion "
+                "fmt:%s s:%dx%d -> fmt:%s s:%dx%d\n",
+                av_get_pix_fmt_name(AV_PIX_FMT_GRAY8),  frame->width, frame->height,
+                av_get_pix_fmt_name(AV_PIX_FMT_GRAYF32),frame->width, frame->height);
+            return DNN_ERROR;
+        }
         sws_scale(sws_ctx, (const uint8_t **)frame->data,
                            frame->linesize, 0, frame->height,
                            (uint8_t * const*)(&input->data),
@@ -127,7 +156,8 @@ DNNReturnType proc_from_frame_to_dnn(AVFrame *frame, DNNData *input, void *log_c
         sws_freeContext(sws_ctx);
         break;
     default:
-        av_log(log_ctx, AV_LOG_ERROR, "do not support frame format %d\n", frame->format);
+        av_log(log_ctx, AV_LOG_ERROR, "do not support frame format %s\n",
+               av_get_pix_fmt_name(frame->format));
         return DNN_ERROR;
     }
 
