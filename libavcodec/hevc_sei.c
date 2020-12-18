@@ -169,7 +169,7 @@ static int decode_registered_user_data_closed_caption(HEVCSEIA53Caption *s, GetB
     int ret;
 
     if (size < 3)
-       return AVERROR(EINVAL);
+       return AVERROR_INVALIDDATA;
 
     ret = ff_parse_a53_cc(&s->buf_ref, gb->buffer + get_bits_count(gb) / 8, size);
 
@@ -236,28 +236,34 @@ static int decode_registered_user_data_dynamic_hdr_plus(HEVCSEIDynamicHDRPlus *s
 }
 
 static int decode_nal_sei_user_data_registered_itu_t_t35(HEVCSEI *s, GetBitContext *gb,
-                                                         int size)
+                                                         void *logctx, int size)
 {
-    const uint8_t usa_country_code = 0xB5;
-    const uint16_t smpte_provider_code = 0x003C;
-
-    uint8_t country_code = 0;
-    uint16_t provider_code = 0;
+    int country_code, provider_code;
 
     if (size < 3)
-        return AVERROR(EINVAL);
+        return AVERROR_INVALIDDATA;
     size -= 3;
 
     country_code = get_bits(gb, 8);
     if (country_code == 0xFF) {
+        if (size < 1)
+            return AVERROR_INVALIDDATA;
+
         skip_bits(gb, 8);
         size--;
     }
 
+    if (country_code != 0xB5) { // usa_country_code
+        av_log(logctx, AV_LOG_VERBOSE,
+               "Unsupported User Data Registered ITU-T T35 SEI message (country_code = %d)\n",
+               country_code);
+        goto end;
+    }
+
     provider_code = get_bits(gb, 16);
 
-    if (country_code == usa_country_code &&
-        provider_code == smpte_provider_code) {
+    switch (provider_code) {
+    case 0x3C: { // smpte_provider_code
         // A/341 Amendment - 2094-40
         const uint16_t smpte2094_40_provider_oriented_code = 0x0001;
         const uint8_t smpte2094_40_application_identifier = 0x04;
@@ -265,7 +271,7 @@ static int decode_nal_sei_user_data_registered_itu_t_t35(HEVCSEI *s, GetBitConte
         uint8_t application_identifier;
 
         if (size < 3)
-            return AVERROR(EINVAL);
+            return AVERROR_INVALIDDATA;
         size -= 3;
 
         provider_oriented_code = get_bits(gb, 16);
@@ -274,11 +280,13 @@ static int decode_nal_sei_user_data_registered_itu_t_t35(HEVCSEI *s, GetBitConte
             application_identifier == smpte2094_40_application_identifier) {
             return decode_registered_user_data_dynamic_hdr_plus(&s->dynamic_hdr_plus, gb, size);
         }
-    } else {
+        break;
+    }
+    case 0x31: { // atsc_provider_code
         uint32_t user_identifier;
 
         if (size < 4)
-            return AVERROR(EINVAL);
+            return AVERROR_INVALIDDATA;
         size -= 4;
 
         user_identifier = get_bits_long(gb, 32);
@@ -286,9 +294,21 @@ static int decode_nal_sei_user_data_registered_itu_t_t35(HEVCSEI *s, GetBitConte
         case MKBETAG('G', 'A', '9', '4'):
             return decode_registered_user_data_closed_caption(&s->a53_caption, gb, size);
         default:
+            av_log(logctx, AV_LOG_VERBOSE,
+                   "Unsupported User Data Registered ITU-T T35 SEI message (atsc user_identifier = 0x%04x)\n",
+                   user_identifier);
             break;
         }
+        break;
     }
+    default:
+        av_log(logctx, AV_LOG_VERBOSE,
+               "Unsupported User Data Registered ITU-T T35 SEI message (provider_code = %d)\n",
+               provider_code);
+        break;
+    }
+
+end:
     skip_bits_long(gb, size * 8);
     return 0;
 }
@@ -395,7 +415,7 @@ static int decode_nal_sei_prefix(GetBitContext *gb, void *logctx, HEVCSEI *s,
     case HEVC_SEI_TYPE_ACTIVE_PARAMETER_SETS:
         return decode_nal_sei_active_parameter_sets(s, gb, logctx);
     case HEVC_SEI_TYPE_USER_DATA_REGISTERED_ITU_T_T35:
-        return decode_nal_sei_user_data_registered_itu_t_t35(s, gb, size);
+        return decode_nal_sei_user_data_registered_itu_t_t35(s, gb, logctx, size);
     case HEVC_SEI_TYPE_USER_DATA_UNREGISTERED:
         return decode_nal_sei_user_data_unregistered(&s->unregistered, gb, size);
     case HEVC_SEI_TYPE_ALTERNATIVE_TRANSFER_CHARACTERISTICS:
