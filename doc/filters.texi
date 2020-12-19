@@ -7158,6 +7158,10 @@ Allowed range is 0 to 1. Default is 0.1.
 Set planes to filter. Default is first only.
 @end table
 
+@subsection Commands
+
+This filter supports the all above options as @ref{commands}.
+
 @section bitplanenoise
 
 Show and measure bit plane noise.
@@ -7665,6 +7669,9 @@ Set the sharpening strength. Default value is 0.
 Set planes to filter. Default value is to filter all
 planes except alpha plane.
 @end table
+
+@subsection Commands
+This filter supports same @ref{commands} as options.
 
 @section chromahold
 Remove all color information for all colors except for certain one.
@@ -11766,12 +11773,15 @@ fill pixels using reflecting (whole sample symmetric)
 
 @item wrap
 fill pixels using wrapping
+
+@item fade
+fade pixels to constant value
 @end table
 
 Default is @var{smear}.
 
 @item color
-Set color for pixels in fixed mode. Default is @var{black}.
+Set color for pixels in fixed or fade mode. Default is @var{black}.
 @end table
 
 @subsection Commands
@@ -13961,6 +13971,10 @@ copied from first stream.
 By default value 0xf, all planes will be processed.
 @end table
 
+@subsection Commands
+
+This filter supports the all above options as @ref{commands}.
+
 @section maskedmax
 
 Merge the second and third input stream into output stream using absolute differences
@@ -13976,6 +13990,10 @@ Set which planes will be processed as bitmap, unprocessed planes will be
 copied from first stream.
 By default value 0xf, all planes will be processed.
 @end table
+
+@subsection Commands
+
+This filter supports the all above options as @ref{commands}.
 
 @section maskedmerge
 
@@ -14011,6 +14029,10 @@ Set which planes will be processed as bitmap, unprocessed planes will be
 copied from first stream.
 By default value 0xf, all planes will be processed.
 @end table
+
+@subsection Commands
+
+This filter supports the all above options as @ref{commands}.
 
 @section maskedthreshold
 Pick pixels comparing absolute difference of two video streams with fixed
