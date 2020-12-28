@@ -1,78 +1,90 @@
-From 0b0018539c94141aee912defb44bdfe55ca48ae8 Mon Sep 17 00:00:00 2001
+From d809f024818864e0a8567aea06f5943e252613b2 Mon Sep 17 00:00:00 2001
 From: Wenbinc-Bin <wenbin.chen@intel.com>
-Date: Wed, 9 Dec 2020 16:38:45 +0800
-Subject: [PATCH] libavcodec/qsvenc: add low latency P-pyramid support for qsv
+Date: Mon, 28 Dec 2020 15:26:03 +0800
+Subject: [PATCH V3] libavcodec/qsvenc: add low latency P-pyramid support for qsv
 
 Add low latency P-pyramid support for qsv, and it relates to a new
 command line parameter "-p_strategy". To enable this flag, user also
-need to set "-bf" to -1 or 0.
+need to set "-bf" to 0.
+P-strategy has two modes "simple" and "pyramid". The details of these
+model refers to https://github.com/Intel-Media-SDK/MediaSDK/blob/master/doc/mediasdk-man.md#PRefType
 
 Signed-off-by Wenbin Chen <wenbin.chen@intel.com>
 ---
- libavcodec/qsvenc.c | 22 ++++++++++++++++++++++
+ libavcodec/qsvenc.c | 32 ++++++++++++++++++++++++++++++++
  libavcodec/qsvenc.h |  2 ++
- 2 files changed, 24 insertions(+)
+ 2 files changed, 34 insertions(+)
 
 diff --git a/libavcodec/qsvenc.c b/libavcodec/qsvenc.c
-index 2bd2a56227..c3b41374e4 100644
+index 2bd2a56227..3b75a83432 100644
 --- a/libavcodec/qsvenc.c
 +++ b/libavcodec/qsvenc.c
-@@ -268,6 +268,13 @@ static void dump_video_param(AVCodecContext *avctx, QSVEncContext *q,
+@@ -268,6 +268,15 @@ static void dump_video_param(AVCodecContext *avctx, QSVEncContext *q,
      case MFX_B_REF_PYRAMID: av_log(avctx, AV_LOG_VERBOSE, "pyramid");   break;
      default:                av_log(avctx, AV_LOG_VERBOSE, "auto");      break;
      }
++
 +    av_log(avctx, AV_LOG_VERBOSE, "; PRefType: ");
 +    switch(co3->PRefType){
-+        case MFX_P_REF_DEFAULT: av_log(avctx, AV_LOG_VERBOSE, "default");   break;
-+        case MFX_P_REF_SIMPLE:  av_log(avctx, AV_LOG_VERBOSE, "simple");   break;
-+        case MFX_P_REF_PYRAMID: av_log(avctx, AV_LOG_VERBOSE, "pyramid");   break;
-+        default:    break;
++    case MFX_P_REF_DEFAULT: av_log(avctx, AV_LOG_VERBOSE, "default");   break;
++    case MFX_P_REF_SIMPLE:  av_log(avctx, AV_LOG_VERBOSE, "simple");    break;
++    case MFX_P_REF_PYRAMID: av_log(avctx, AV_LOG_VERBOSE, "pyramid");   break;
++    default:                av_log(avctx, AV_LOG_VERBOSE, "unknown");   break;
 +    }
++
      av_log(avctx, AV_LOG_VERBOSE, "\n");
  #endif
  
-@@ -777,6 +784,21 @@ FF_ENABLE_DEPRECATION_WARNINGS
+@@ -777,6 +786,29 @@ FF_ENABLE_DEPRECATION_WARNINGS
  #if QSV_HAVE_CO3
          q->extco3.Header.BufferId      = MFX_EXTBUFF_CODING_OPTION3;
          q->extco3.Header.BufferSz      = sizeof(q->extco3);
++
 +        switch(q->p_strategy){
-+            case 0:
-+                q->extco3.PRefType = MFX_P_REF_DEFAULT;
-+                break;
-+            case 1:
-+                q->extco3.PRefType = MFX_P_REF_SIMPLE;
-+                break;
-+            case 2:
-+                q->extco3.PRefType = MFX_P_REF_PYRAMID;
-+                break;
-+            default:
-+                q->extco3.PRefType = MFX_P_REF_DEFAULT;
-+                av_log(avctx, AV_LOG_VERBOSE, "invalid p_strategy, set to default\n");
-+                break;
++        case 0:
++            q->extco3.PRefType = MFX_P_REF_DEFAULT;
++            break;
++        case 1:
++            q->extco3.PRefType = MFX_P_REF_SIMPLE;
++            break;
++        case 2:
++            q->extco3.PRefType = MFX_P_REF_PYRAMID;
++            break;
++        default:
++            q->extco3.PRefType = MFX_P_REF_DEFAULT;
++            av_log(avctx, AV_LOG_WARNING, "invalid p_strategy, set to default\n");
++            break;
++        } 
++        if((q->extco3.PRefType == MFX_P_REF_SIMPLE ||
++            q->extco3.PRefType == MFX_P_REF_PYRAMID) && 
++            avctx->max_b_frames != 0){
++            av_log(avctx, AV_LOG_WARNING, "Please set max_b_frames(-bf) to 0 to enable P-pyramid\n");
 +        }
++
++
  #if QSV_HAVE_GPB
          if (avctx->codec_id == AV_CODEC_ID_HEVC)
              q->extco3.GPB              = q->gpb ? MFX_CODINGOPTION_ON : MFX_CODINGOPTION_OFF;
 diff --git a/libavcodec/qsvenc.h b/libavcodec/qsvenc.h
-index 6d305f87dd..30aaf72ebd 100644
+index 6d305f87dd..1b6149cccf 100644
 --- a/libavcodec/qsvenc.h
 +++ b/libavcodec/qsvenc.h
 @@ -95,6 +95,7 @@
  { "adaptive_i",     "Adaptive I-frame placement",             OFFSET(qsv.adaptive_i),     AV_OPT_TYPE_INT, { .i64 = -1 }, -1,          1, VE },                         \
  { "adaptive_b",     "Adaptive B-frame placement",             OFFSET(qsv.adaptive_b),     AV_OPT_TYPE_INT, { .i64 = -1 }, -1,          1, VE },                         \
  { "b_strategy",     "Strategy to choose between I/P/B-frames", OFFSET(qsv.b_strategy),    AV_OPT_TYPE_INT, { .i64 = -1 }, -1,          1, VE },                         \
-+{ "p_strategy",     "enable P-pyramid 0-default 1-simple 2-pyramis",    OFFSET(qsv.p_strategy), AV_OPT_TYPE_INT,    { .i64 = 0}, 0,    2, VE },                       \
++{ "p_strategy",     "enable P-pyramid 0-default 1-simple 2-pyramid",    OFFSET(qsv.p_strategy), AV_OPT_TYPE_INT,    { .i64 = 0}, 0,    2, VE },                         \
  { "forced_idr",     "Forcing I frames as IDR frames",         OFFSET(qsv.forced_idr),     AV_OPT_TYPE_BOOL,{ .i64 = 0  },  0,          1, VE },                         \
  { "low_power", "enable low power mode(experimental: many limitations by mfx version, BRC modes, etc.)", OFFSET(qsv.low_power), AV_OPT_TYPE_BOOL, { .i64 = 0}, 0, 1, VE},\
  
-@@ -182,6 +183,7 @@ typedef struct QSVEncContext {
+@@ -181,6 +182,7 @@ typedef struct QSVEncContext {
+     int extbrc;
      int adaptive_i;
      int adaptive_b;
-     int b_strategy;
 +    int p_strategy;
+     int b_strategy;
      int cavlc;
  
-     int int_ref_type;
 -- 
 2.25.1
 
