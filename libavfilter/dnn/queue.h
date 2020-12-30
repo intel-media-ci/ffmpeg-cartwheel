@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Sergey Lavrushkin
+ * Copyright (c) 2020
  *
  * This file is part of FFmpeg.
  *
@@ -18,22 +18,24 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-/**
- * @file
- * DNN inference functions interface for TensorFlow backend.
- */
 
+#ifndef AVFILTER_DNN_QUEUE_H
+#define AVFILTER_DNN_QUEUE_H
 
-#ifndef AVFILTER_DNN_DNN_BACKEND_TF_H
-#define AVFILTER_DNN_DNN_BACKEND_TF_H
+typedef struct _queue queue;
 
-#include "../dnn_interface.h"
+queue *queue_create(void);
+void queue_destroy(queue *q);
 
-DNNModel *ff_dnn_load_model_tf(const char *model_filename, const char *options, AVFilterContext *filter_ctx);
+size_t queue_size(queue *q);
 
-DNNReturnType ff_dnn_execute_model_tf(const DNNModel *model, const char *input_name, AVFrame *in_frame,
-                                      const char **output_names, uint32_t nb_output, AVFrame *out_frame);
+void *queue_peek_front(queue *q);
+void *queue_peek_back(queue *q);
 
-void ff_dnn_free_model_tf(DNNModel **model);
+void queue_push_front(queue *q, void *v);
+void queue_push_back(queue *q, void *v);
+
+void *queue_pop_front(queue *q);
+void *queue_pop_back(queue *q);
 
 #endif

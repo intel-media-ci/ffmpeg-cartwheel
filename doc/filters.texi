@@ -9959,6 +9959,10 @@ Set the input name of the dnn network.
 @item output
 Set the output name of the dnn network.
 
+@item async
+use DNN async execution if set (default: set),
+roll back to sync execution if the backend does not support async.
+
 @end table
 
 @subsection Examples
@@ -19315,6 +19319,10 @@ Default value of @code{0.5} will pick always median values, while @code{0} will 
 minimum values, and @code{1} maximum values.
 @end table
 
+@subsection Commands
+
+This filter supports all above options as @ref{commands}, excluding option @code{radius}.
+
 @section tmix
 
 Mix successive video frames.
@@ -20914,6 +20922,9 @@ Only deinterlace frames marked as interlaced.
 Default value is @samp{all}.
 @end table
 
+@subsection Commands
+This filter supports same @ref{commands} as options.
+
 @section waveform
 Video waveform monitor.
 
@@ -21258,6 +21269,10 @@ Set median percentile. Default value is @code{0.5}.
 Default value of @code{0.5} will pick always median values, while @code{0} will pick
 minimum values, and @code{1} maximum values.
 @end table
+
+@subsection Commands
+
+This filter supports all above options as @ref{commands}, excluding option @code{inputs}.
 
 @section xstack
 Stack video inputs into custom layout.
