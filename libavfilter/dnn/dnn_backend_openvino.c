@@ -53,8 +53,8 @@ typedef struct OVModel{
     ie_infer_request_t *infer_request;
 
     /* for async execution */
-    safe_queue *request_queue;  // holds RequestItem
-    queue *task_queue;          // holds TaskItem
+    FFSafeQueue *request_queue;   // holds RequestItem
+    FFQueue *task_queue;          // holds TaskItem
 } OVModel;
 
 typedef struct TaskItem {
@@ -208,7 +208,10 @@ static void infer_completion_callback(void *args)
 
     if (task->async) {
         request->task = NULL;
-        safe_queue_push_back(task->ov_model->request_queue, request);
+        if (ff_safe_queue_push_back(task->ov_model->request_queue, request) < 0) {
+            av_log(ctx, AV_LOG_ERROR, "Failed to push back request_queue.\n");
+            return;
+        }
     }
 
     task->done = 1;
@@ -417,7 +420,7 @@ DNNModel *ff_dnn_load_model_ov(const char *model_filename, const char *options, 
         ctx->options.nireq = av_cpu_count() / 2 + 1;
     }
 
-    ov_model->request_queue = safe_queue_create();
+    ov_model->request_queue = ff_safe_queue_create();
     if (!ov_model->request_queue) {
         goto err;
     }
@@ -436,10 +439,13 @@ DNNModel *ff_dnn_load_model_ov(const char *model_filename, const char *options, 
         item->infer_request = request;
         item->callback.completeCallBackFunc = infer_completion_callback;
         item->callback.args = item;
-        safe_queue_push_back(ov_model->request_queue, item);
+        if (ff_safe_queue_push_back(ov_model->request_queue, item) < 0) {
+            av_freep(&item);
+            goto err;
+        }
     }
 
-    ov_model->task_queue = queue_create();
+    ov_model->task_queue = ff_queue_create();
     if (!ov_model->task_queue) {
         goto err;
     }
@@ -527,9 +533,13 @@ DNNReturnType ff_dnn_execute_model_async_ov(const DNNModel *model, const char *i
     task->output_name = output_names[0];
     task->out_frame = out_frame;
     task->ov_model = ov_model;
-    queue_push_back(ov_model->task_queue, task);
+    if (ff_queue_push_back(ov_model->task_queue, task) < 0) {
+        av_freep(&task);
+        av_log(ctx, AV_LOG_ERROR, "unable to push back task_queue.\n");
+        return DNN_ERROR;
+    }
 
-    request = safe_queue_pop_front(ov_model->request_queue);
+    request = ff_safe_queue_pop_front(ov_model->request_queue);
     if (!request) {
         av_log(ctx, AV_LOG_ERROR, "unable to get infer request.\n");
         return DNN_ERROR;
@@ -541,7 +551,7 @@ DNNReturnType ff_dnn_execute_model_async_ov(const DNNModel *model, const char *i
 DNNAsyncStatusType ff_dnn_get_async_result_ov(const DNNModel *model, AVFrame **in, AVFrame **out)
 {
     OVModel *ov_model = (OVModel *)model->model;
-    TaskItem *task = queue_peek_front(ov_model->task_queue);
+    TaskItem *task = ff_queue_peek_front(ov_model->task_queue);
 
     if (!task) {
         return DAST_EMPTY_QUEUE;
@@ -553,7 +563,7 @@ DNNAsyncStatusType ff_dnn_get_async_result_ov(const DNNModel *model, AVFrame **i
 
     *in = task->in_frame;
     *out = task->out_frame;
-    queue_pop_front(ov_model->task_queue);
+    ff_queue_pop_front(ov_model->task_queue);
     av_freep(&task);
 
     return DAST_SUCCESS;
@@ -563,20 +573,20 @@ void ff_dnn_free_model_ov(DNNModel **model)
 {
     if (*model){
         OVModel *ov_model = (OVModel *)(*model)->model;
-        while (safe_queue_size(ov_model->request_queue) != 0) {
-            RequestItem *item = safe_queue_pop_front(ov_model->request_queue);
+        while (ff_safe_queue_size(ov_model->request_queue) != 0) {
+            RequestItem *item = ff_safe_queue_pop_front(ov_model->request_queue);
             if (item && item->infer_request) {
                 ie_infer_request_free(&item->infer_request);
             }
             av_freep(&item);
         }
-        safe_queue_destroy(ov_model->request_queue);
+        ff_safe_queue_destroy(ov_model->request_queue);
 
-        while (queue_size(ov_model->task_queue) != 0) {
-            TaskItem *item = queue_pop_front(ov_model->task_queue);
+        while (ff_queue_size(ov_model->task_queue) != 0) {
+            TaskItem *item = ff_queue_pop_front(ov_model->task_queue);
             av_freep(&item);
         }
-        queue_destroy(ov_model->task_queue);
+        ff_queue_destroy(ov_model->task_queue);
 
         if (ov_model->infer_request)
             ie_infer_request_free(&ov_model->infer_request);

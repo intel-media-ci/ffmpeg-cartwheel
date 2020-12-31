@@ -26,6 +26,7 @@
 
 #define BITSTREAM_READER_LE
 
+#include "config.h"
 #include "libavutil/attributes.h"
 
 #include "avcodec.h"
@@ -135,11 +136,12 @@ static const uint8_t speedhq_run[121] = {
 RLTable ff_rl_speedhq = {
     121,
     121,
-    (const uint16_t (*)[])speedhq_vlc,
+    speedhq_vlc,
     speedhq_run,
     speedhq_level,
 };
 
+#if CONFIG_SPEEDHQ_DECODER
 /* NOTE: The first element is always 16, unscaled. */
 static const uint8_t unscaled_quant_matrix[64] = {
     16, 16, 19, 22, 26, 27, 29, 34,
@@ -656,3 +658,4 @@ AVCodec ff_speedhq_decoder = {
     .decode         = speedhq_decode_frame,
     .capabilities   = AV_CODEC_CAP_DR1,
 };
+#endif /* CONFIG_SPEEDHQ_DECODER */

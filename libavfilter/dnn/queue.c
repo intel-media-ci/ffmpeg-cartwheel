@@ -23,36 +23,44 @@
 #include "libavutil/mem.h"
 #include "libavutil/avassert.h"
 
-typedef struct _queue_entry queue_entry;
+typedef struct FFQueueEntry FFQueueEntry;
 
-typedef struct _queue {
-    queue_entry *head;
-    queue_entry *tail;
-    size_t length;
-}queue;
-
-typedef struct _queue_entry {
+struct FFQueueEntry {
     void *value;
-    queue_entry *prev;
-    queue_entry *next;
-} queue_entry;
+    FFQueueEntry *prev;
+    FFQueueEntry *next;
+};
 
-static inline queue_entry *create_entry(void *val)
+struct FFQueue {
+    FFQueueEntry *head;
+    FFQueueEntry *tail;
+    size_t length;
+};
+
+static inline FFQueueEntry *create_entry(void *val)
 {
-    queue_entry *entry = av_malloc(sizeof(*entry));
-    av_assert0(entry != NULL);
-    entry->value = val;
+    FFQueueEntry *entry = av_malloc(sizeof(*entry));
+    if (entry)
+        entry->value = val;
     return entry;
 }
 
-queue* queue_create(void)
+FFQueue* ff_queue_create(void)
 {
-    queue *q = av_malloc(sizeof(*q));
+    FFQueue *q = av_malloc(sizeof(*q));
     if (!q)
         return NULL;
 
     q->head = create_entry(q);
     q->tail = create_entry(q);
+
+    if (!q->head || !q->tail) {
+        av_freep(&q->head);
+        av_freep(&q->tail);
+        av_freep(&q);
+        return NULL;
+    }
+
     q->head->next = q->tail;
     q->tail->prev = q->head;
     q->head->prev = NULL;
@@ -62,15 +70,15 @@ queue* queue_create(void)
     return q;
 }
 
-void queue_destroy(queue *q)
+void ff_queue_destroy(FFQueue *q)
 {
-    queue_entry *entry;
+    FFQueueEntry *entry;
     if (!q)
         return;
 
     entry = q->head;
     while (entry != NULL) {
-        queue_entry *temp = entry;
+        FFQueueEntry *temp = entry;
         entry = entry->next;
         av_freep(&temp);
     }
@@ -78,12 +86,12 @@ void queue_destroy(queue *q)
     av_freep(&q);
 }
 
-size_t queue_size(queue *q)
+size_t ff_queue_size(FFQueue *q)
 {
      return q ? q->length : 0;
 }
 
-void *queue_peek_front(queue *q)
+void *ff_queue_peek_front(FFQueue *q)
 {
     if (!q || q->length == 0)
         return NULL;
@@ -91,7 +99,7 @@ void *queue_peek_front(queue *q)
     return q->head->next->value;
 }
 
-void *queue_peek_back(queue *q)
+void *ff_queue_peek_back(FFQueue *q)
 {
     if (!q || q->length == 0)
         return NULL;
@@ -99,14 +107,16 @@ void *queue_peek_back(queue *q)
     return q->tail->prev->value;
 }
 
-void queue_push_front(queue *q, void *v)
+int ff_queue_push_front(FFQueue *q, void *v)
 {
-    queue_entry *new_entry;
-    queue_entry *original_next;
+    FFQueueEntry *new_entry;
+    FFQueueEntry *original_next;
     if (!q)
-        return;
+        return 0;
 
     new_entry = create_entry(v);
+    if (!new_entry)
+        return -1;
     original_next = q->head->next;
 
     q->head->next = new_entry;
@@ -114,16 +124,20 @@ void queue_push_front(queue *q, void *v)
     new_entry->prev = q->head;
     new_entry->next = original_next;
     q->length++;
+
+    return q->length;
 }
 
-void queue_push_back(queue *q, void *v)
+int ff_queue_push_back(FFQueue *q, void *v)
 {
-    queue_entry *new_entry;
-    queue_entry *original_prev;
+    FFQueueEntry *new_entry;
+    FFQueueEntry *original_prev;
     if (!q)
-        return;
+        return 0;
 
     new_entry = create_entry(v);
+    if (!new_entry)
+        return -1;
     original_prev = q->tail->prev;
 
     q->tail->prev = new_entry;
@@ -131,12 +145,14 @@ void queue_push_back(queue *q, void *v)
     new_entry->next = q->tail;
     new_entry->prev = original_prev;
     q->length++;
+
+    return q->length;
 }
 
-void *queue_pop_front(queue *q)
+void *ff_queue_pop_front(FFQueue *q)
 {
-    queue_entry *front;
-    queue_entry *new_head_next;
+    FFQueueEntry *front;
+    FFQueueEntry *new_head_next;
     void *ret;
 
     if (!q || q->length == 0)
@@ -154,10 +170,10 @@ void *queue_pop_front(queue *q)
     return ret;
 }
 
-void *queue_pop_back(queue *q)
+void *ff_queue_pop_back(FFQueue *q)
 {
-    queue_entry *back;
-    queue_entry *new_tail_prev;
+    FFQueueEntry *back;
+    FFQueueEntry *new_tail_prev;
     void *ret;
 
     if (!q || q->length == 0)
