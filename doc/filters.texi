@@ -7144,6 +7144,10 @@ The filter accepts the following option:
 Set the minimal luminance value. Default is @code{16}.
 @end table
 
+@subsection Commands
+
+This filter supports the all above options as @ref{commands}.
+
 @section bilateral
 Apply bilateral filter, spatial smoothing while preserving edges.
 
@@ -9203,6 +9207,9 @@ Set background opacity.
 
 @item format
 Set display number format. Can be @code{hex}, or @code{dec}. Default is @code{hex}.
+
+@item components
+Set pixel components to display. By default all pixel components are displayed.
 @end table
 
 @section dblur
@@ -14084,6 +14091,10 @@ Set which planes will be processed as bitmap, unprocessed planes will be
 copied from first stream.
 By default value 0xf, all planes will be processed.
 @end table
+
+@subsection Commands
+
+This filter supports the all above options as @ref{commands}.
 
 @section maskedmin
 
