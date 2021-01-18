@@ -38,6 +38,7 @@ typedef struct OVOptions{
     char *device_type;
     int nireq;
     int batch_size;
+    int input_resizable;
 } OVOptions;
 
 typedef struct OVContext {
@@ -86,6 +87,7 @@ static const AVOption dnn_openvino_options[] = {
     { "device", "device to run model", OFFSET(options.device_type), AV_OPT_TYPE_STRING, { .str = "CPU" }, 0, 0, FLAGS },
     { "nireq",  "number of request",   OFFSET(options.nireq),       AV_OPT_TYPE_INT,    { .i64 = 0 },     0, INT_MAX, FLAGS },
     { "batch_size",  "batch size per request", OFFSET(options.batch_size),  AV_OPT_TYPE_INT,    { .i64 = 1 },     1, 1000, FLAGS},
+    { "input_resizable", "can input be resizable or not", OFFSET(options.input_resizable), AV_OPT_TYPE_BOOL,   { .i64 = 0 },     0, 1, FLAGS },
     { NULL }
 };
 
@@ -248,194 +250,13 @@ static void infer_completion_callback(void *args)
     }
 }
 
-static DNNReturnType execute_model_ov(RequestItem *request)
+static DNNReturnType init_model_ov(OVModel *ov_model)
 {
-    IEStatusCode status;
-    DNNReturnType ret;
-    TaskItem *task = request->tasks[0];
-    OVContext *ctx = &task->ov_model->ctx;
-
-    if (task->async) {
-        if (request->task_count < ctx->options.batch_size) {
-            if (ff_safe_queue_push_front(task->ov_model->request_queue, request) < 0) {
-                av_log(ctx, AV_LOG_ERROR, "Failed to push back request_queue.\n");
-                return DNN_ERROR;
-            }
-            return DNN_SUCCESS;
-        }
-        ret = fill_model_input_ov(task->ov_model, request);
-        if (ret != DNN_SUCCESS) {
-            return ret;
-        }
-        status = ie_infer_set_completion_callback(request->infer_request, &request->callback);
-        if (status != OK) {
-            av_log(ctx, AV_LOG_ERROR, "Failed to set completion callback for inference\n");
-            return DNN_ERROR;
-        }
-        status = ie_infer_request_infer_async(request->infer_request);
-        if (status != OK) {
-            av_log(ctx, AV_LOG_ERROR, "Failed to start async inference\n");
-            return DNN_ERROR;
-        }
-        return DNN_SUCCESS;
-    } else {
-        ret = fill_model_input_ov(task->ov_model, request);
-        if (ret != DNN_SUCCESS) {
-            return ret;
-        }
-        status = ie_infer_request_infer(request->infer_request);
-        if (status != OK) {
-            av_log(ctx, AV_LOG_ERROR, "Failed to start synchronous model inference\n");
-            return DNN_ERROR;
-        }
-        infer_completion_callback(request);
-        return task->done ? DNN_SUCCESS : DNN_ERROR;
-    }
-}
-
-static DNNReturnType get_input_ov(void *model, DNNData *input, const char *input_name)
-{
-    OVModel *ov_model = (OVModel *)model;
     OVContext *ctx = &ov_model->ctx;
-    char *model_input_name = NULL;
-    char *all_input_names = NULL;
     IEStatusCode status;
-    size_t model_input_count = 0;
-    dimensions_t dims;
-    precision_e precision;
-
-    status = ie_network_get_inputs_number(ov_model->network, &model_input_count);
-    if (status != OK) {
-        av_log(ctx, AV_LOG_ERROR, "Failed to get input count\n");
-        return DNN_ERROR;
-    }
-
-    for (size_t i = 0; i < model_input_count; i++) {
-        status = ie_network_get_input_name(ov_model->network, i, &model_input_name);
-        if (status != OK) {
-            av_log(ctx, AV_LOG_ERROR, "Failed to get No.%d input's name\n", (int)i);
-            return DNN_ERROR;
-        }
-        if (strcmp(model_input_name, input_name) == 0) {
-            ie_network_name_free(&model_input_name);
-            status |= ie_network_get_input_dims(ov_model->network, input_name, &dims);
-            status |= ie_network_get_input_precision(ov_model->network, input_name, &precision);
-            if (status != OK) {
-                av_log(ctx, AV_LOG_ERROR, "Failed to get No.%d input's dims or precision\n", (int)i);
-                return DNN_ERROR;
-            }
-
-            // The order of dims in the openvino is fixed and it is always NCHW for 4-D data.
-            // while we pass NHWC data from FFmpeg to openvino
-            status = ie_network_set_input_layout(ov_model->network, input_name, NHWC);
-            if (status != OK) {
-                av_log(ctx, AV_LOG_ERROR, "Input \"%s\" does not match layout NHWC\n", input_name);
-                return DNN_ERROR;
-            }
-
-            input->channels = dims.dims[1];
-            input->height   = dims.dims[2];
-            input->width    = dims.dims[3];
-            input->dt       = precision_to_datatype(precision);
-            return DNN_SUCCESS;
-        } else {
-            //incorrect input name
-            APPEND_STRING(all_input_names, model_input_name)
-        }
-
-        ie_network_name_free(&model_input_name);
-    }
-
-    av_log(ctx, AV_LOG_ERROR, "Could not find \"%s\" in model, all input(s) are: \"%s\"\n", input_name, all_input_names);
-    return DNN_ERROR;
-}
-
-static DNNReturnType get_output_ov(void *model, const char *input_name, int input_width, int input_height,
-                                   const char *output_name, int *output_width, int *output_height)
-{
-    DNNReturnType ret;
-    OVModel *ov_model = (OVModel *)model;
-    OVContext *ctx = &ov_model->ctx;
-    TaskItem task;
-    RequestItem request;
-    AVFrame *in_frame = av_frame_alloc();
-    AVFrame *out_frame = NULL;
-    TaskItem *ptask = &task;
-
-    if (!in_frame) {
-        av_log(ctx, AV_LOG_ERROR, "Failed to allocate memory for input frame\n");
-        return DNN_ERROR;
-    }
-    out_frame = av_frame_alloc();
-    if (!out_frame) {
-        av_log(ctx, AV_LOG_ERROR, "Failed to allocate memory for output frame\n");
-        av_frame_free(&in_frame);
-        return DNN_ERROR;
-    }
-    in_frame->width = input_width;
-    in_frame->height = input_height;
-
-    task.done = 0;
-    task.do_ioproc = 0;
-    task.async = 0;
-    task.input_name = input_name;
-    task.in_frame = in_frame;
-    task.output_name = output_name;
-    task.out_frame = out_frame;
-    task.ov_model = ov_model;
-
-    request.infer_request = ov_model->infer_request;
-    request.task_count = 1;
-    request.tasks = &ptask;
-
-    ret = execute_model_ov(&request);
-    *output_width = out_frame->width;
-    *output_height = out_frame->height;
-
-    av_frame_free(&out_frame);
-    av_frame_free(&in_frame);
-    return ret;
-}
-
-DNNModel *ff_dnn_load_model_ov(const char *model_filename, const char *options, AVFilterContext *filter_ctx)
-{
-    char *all_dev_names = NULL;
-    DNNModel *model = NULL;
-    OVModel *ov_model = NULL;
-    OVContext *ctx = NULL;
-    IEStatusCode status;
-    ie_config_t config = {NULL, NULL, NULL};
     ie_available_devices_t a_dev;
-
-    model = av_mallocz(sizeof(DNNModel));
-    if (!model){
-        return NULL;
-    }
-
-    ov_model = av_mallocz(sizeof(OVModel));
-    if (!ov_model) {
-        av_freep(&model);
-        return NULL;
-    }
-    model->model = (void *)ov_model;
-    ov_model->model = model;
-    ov_model->ctx.class = &dnn_openvino_class;
-    ctx = &ov_model->ctx;
-
-    //parse options
-    av_opt_set_defaults(ctx);
-    if (av_opt_set_from_string(ctx, options, NULL, "=", "&") < 0) {
-        av_log(ctx, AV_LOG_ERROR, "Failed to parse options \"%s\"\n", options);
-        goto err;
-    }
-
-    status = ie_core_create("", &ov_model->core);
-    if (status != OK)
-        goto err;
-
-    status = ie_core_read_network(ov_model->core, model_filename, NULL, &ov_model->network);
-    if (status != OK)
-        goto err;
+    ie_config_t config = {NULL, NULL, NULL};
+    char *all_dev_names = NULL;
 
     // batch size
     if (ctx->options.batch_size <= 0) {
@@ -457,7 +278,7 @@ DNNModel *ff_dnn_load_model_ov(const char *model_filename, const char *options, 
 
     status = ie_core_load_network(ov_model->core, ov_model->network, ctx->options.device_type, &config, &ov_model->exe_network);
     if (status != OK) {
-        av_log(ctx, AV_LOG_ERROR, "Failed to init OpenVINO model\n");
+        av_log(ctx, AV_LOG_ERROR, "Failed to load OpenVINO model network\n");
         status = ie_core_get_available_devices(ov_model->core, &a_dev);
         if (status != OK) {
             av_log(ctx, AV_LOG_ERROR, "Failed to get available devices\n");
@@ -519,6 +340,213 @@ DNNModel *ff_dnn_load_model_ov(const char *model_filename, const char *options, 
         goto err;
     }
 
+    return DNN_SUCCESS;
+
+err:
+    ff_dnn_free_model_ov(&ov_model->model);
+    return DNN_ERROR;
+}
+
+static DNNReturnType execute_model_ov(RequestItem *request)
+{
+    IEStatusCode status;
+    DNNReturnType ret;
+    TaskItem *task = request->tasks[0];
+    OVContext *ctx = &task->ov_model->ctx;
+
+    if (task->async) {
+        if (request->task_count < ctx->options.batch_size) {
+            if (ff_safe_queue_push_front(task->ov_model->request_queue, request) < 0) {
+                av_log(ctx, AV_LOG_ERROR, "Failed to push back request_queue.\n");
+                return DNN_ERROR;
+            }
+            return DNN_SUCCESS;
+        }
+        ret = fill_model_input_ov(task->ov_model, request);
+        if (ret != DNN_SUCCESS) {
+            return ret;
+        }
+        status = ie_infer_set_completion_callback(request->infer_request, &request->callback);
+        if (status != OK) {
+            av_log(ctx, AV_LOG_ERROR, "Failed to set completion callback for inference\n");
+            return DNN_ERROR;
+        }
+        status = ie_infer_request_infer_async(request->infer_request);
+        if (status != OK) {
+            av_log(ctx, AV_LOG_ERROR, "Failed to start async inference\n");
+            return DNN_ERROR;
+        }
+        return DNN_SUCCESS;
+    } else {
+        ret = fill_model_input_ov(task->ov_model, request);
+        if (ret != DNN_SUCCESS) {
+            return ret;
+        }
+        status = ie_infer_request_infer(request->infer_request);
+        if (status != OK) {
+            av_log(ctx, AV_LOG_ERROR, "Failed to start synchronous model inference\n");
+            return DNN_ERROR;
+        }
+        infer_completion_callback(request);
+        return task->done ? DNN_SUCCESS : DNN_ERROR;
+    }
+}
+
+static DNNReturnType get_input_ov(void *model, DNNData *input, const char *input_name)
+{
+    OVModel *ov_model = (OVModel *)model;
+    OVContext *ctx = &ov_model->ctx;
+    char *model_input_name = NULL;
+    char *all_input_names = NULL;
+    IEStatusCode status;
+    size_t model_input_count = 0;
+    dimensions_t dims;
+    precision_e precision;
+    int input_resizable = ctx->options.input_resizable;
+
+    status = ie_network_get_inputs_number(ov_model->network, &model_input_count);
+    if (status != OK) {
+        av_log(ctx, AV_LOG_ERROR, "Failed to get input count\n");
+        return DNN_ERROR;
+    }
+
+    for (size_t i = 0; i < model_input_count; i++) {
+        status = ie_network_get_input_name(ov_model->network, i, &model_input_name);
+        if (status != OK) {
+            av_log(ctx, AV_LOG_ERROR, "Failed to get No.%d input's name\n", (int)i);
+            return DNN_ERROR;
+        }
+        if (strcmp(model_input_name, input_name) == 0) {
+            ie_network_name_free(&model_input_name);
+            status |= ie_network_get_input_dims(ov_model->network, input_name, &dims);
+            status |= ie_network_get_input_precision(ov_model->network, input_name, &precision);
+            if (status != OK) {
+                av_log(ctx, AV_LOG_ERROR, "Failed to get No.%d input's dims or precision\n", (int)i);
+                return DNN_ERROR;
+            }
+
+            input->channels = dims.dims[1];
+            input->height   = input_resizable ? -1 : dims.dims[2];
+            input->width    = input_resizable ? -1 : dims.dims[3];
+            input->dt       = precision_to_datatype(precision);
+            return DNN_SUCCESS;
+        } else {
+            //incorrect input name
+            APPEND_STRING(all_input_names, model_input_name)
+        }
+
+        ie_network_name_free(&model_input_name);
+    }
+
+    av_log(ctx, AV_LOG_ERROR, "Could not find \"%s\" in model, all input(s) are: \"%s\"\n", input_name, all_input_names);
+    return DNN_ERROR;
+}
+
+static DNNReturnType get_output_ov(void *model, const char *input_name, int input_width, int input_height,
+                                   const char *output_name, int *output_width, int *output_height)
+{
+    DNNReturnType ret;
+    OVModel *ov_model = (OVModel *)model;
+    OVContext *ctx = &ov_model->ctx;
+    TaskItem task;
+    RequestItem request;
+    AVFrame *in_frame = av_frame_alloc();
+    AVFrame *out_frame = NULL;
+    TaskItem *ptask = &task;
+    IEStatusCode status;
+    input_shapes_t input_shapes;
+
+    if (!in_frame) {
+        av_log(ctx, AV_LOG_ERROR, "Failed to allocate memory for input frame\n");
+        return DNN_ERROR;
+    }
+    out_frame = av_frame_alloc();
+    if (!out_frame) {
+        av_log(ctx, AV_LOG_ERROR, "Failed to allocate memory for output frame\n");
+        av_frame_free(&in_frame);
+        return DNN_ERROR;
+    }
+    in_frame->width = input_width;
+    in_frame->height = input_height;
+
+    if (ctx->options.input_resizable) {
+        status = ie_network_get_input_shapes(ov_model->network, &input_shapes);
+        input_shapes.shapes->shape.dims[2] = input_height;
+        input_shapes.shapes->shape.dims[3] = input_width;
+        status |= ie_network_reshape(ov_model->network, input_shapes);
+        ie_network_input_shapes_free(&input_shapes);
+        if (status != OK) {
+            av_log(ctx, AV_LOG_ERROR, "Failed to reshape input size for %s\n", input_name);
+            return DNN_ERROR;
+        }
+    }
+
+    if (!ov_model->exe_network) {
+        if (init_model_ov(ov_model) != DNN_SUCCESS) {
+            av_log(ctx, AV_LOG_ERROR, "Failed init OpenVINO exectuable network or inference request\n");
+            return DNN_ERROR;
+        };
+    }
+
+    task.done = 0;
+    task.do_ioproc = 0;
+    task.async = 0;
+    task.input_name = input_name;
+    task.in_frame = in_frame;
+    task.output_name = output_name;
+    task.out_frame = out_frame;
+    task.ov_model = ov_model;
+
+    request.infer_request = ov_model->infer_request;
+    request.task_count = 1;
+    request.tasks = &ptask;
+
+    ret = execute_model_ov(&request);
+    *output_width = out_frame->width;
+    *output_height = out_frame->height;
+
+    av_frame_free(&out_frame);
+    av_frame_free(&in_frame);
+    return ret;
+}
+
+DNNModel *ff_dnn_load_model_ov(const char *model_filename, const char *options, AVFilterContext *filter_ctx)
+{
+    DNNModel *model = NULL;
+    OVModel *ov_model = NULL;
+    OVContext *ctx = NULL;
+    IEStatusCode status;
+
+    model = av_mallocz(sizeof(DNNModel));
+    if (!model){
+        return NULL;
+    }
+
+    ov_model = av_mallocz(sizeof(OVModel));
+    if (!ov_model) {
+        av_freep(&model);
+        return NULL;
+    }
+    model->model = (void *)ov_model;
+    ov_model->model = model;
+    ov_model->ctx.class = &dnn_openvino_class;
+    ctx = &ov_model->ctx;
+
+    //parse options
+    av_opt_set_defaults(ctx);
+    if (av_opt_set_from_string(ctx, options, NULL, "=", "&") < 0) {
+        av_log(ctx, AV_LOG_ERROR, "Failed to parse options \"%s\"\n", options);
+        goto err;
+    }
+
+    status = ie_core_create("", &ov_model->core);
+    if (status != OK)
+        goto err;
+
+    status = ie_core_read_network(ov_model->core, model_filename, NULL, &ov_model->network);
+    if (status != OK)
+        goto err;
+
     model->get_input = &get_input_ov;
     model->get_output = &get_output_ov;
     model->options = options;
@@ -562,6 +590,13 @@ DNNReturnType ff_dnn_execute_model_ov(const DNNModel *model, const char *input_n
         return DNN_ERROR;
     }
 
+    if (!ov_model->exe_network) {
+        if (init_model_ov(ov_model) != DNN_SUCCESS) {
+            av_log(ctx, AV_LOG_ERROR, "Failed init OpenVINO exectuable network or inference request\n");
+            return DNN_ERROR;
+        };
+    }
+
     task.done = 0;
     task.do_ioproc = 1;
     task.async = 0;
@@ -600,6 +635,13 @@ DNNReturnType ff_dnn_execute_model_async_ov(const DNNModel *model, const char *i
     if (!task) {
         av_log(ctx, AV_LOG_ERROR, "unable to alloc memory for task item.\n");
         return DNN_ERROR;
+    }
+
+    if (!ov_model->exe_network) {
+        if (init_model_ov(ov_model) != DNN_SUCCESS) {
+            av_log(ctx, AV_LOG_ERROR, "Failed init OpenVINO exectuable network or inference request\n");
+            return DNN_ERROR;
+        };
     }
 
     task->done = 0;
