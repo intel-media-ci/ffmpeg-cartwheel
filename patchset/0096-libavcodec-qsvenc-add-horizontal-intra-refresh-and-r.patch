@@ -1,0 +1,81 @@
+From 332468bee49a1d748d07ad75d7cd89fa4fcb6028 Mon Sep 17 00:00:00 2001
+From: Wenbinc-Bin <wenbin.chen@intel.com>
+Date: Mon, 18 Jan 2021 14:56:15 +0800
+Subject: [PATCH 5/7] libavcodec/qsvenc: add horizontal intra refresh and
+ refresh cycle dist
+
+Add an new intra refresh type: "horizontal", and an new param
+ref_cycle_dist. This param specify the distance between the
+beginnings of the intra-refresh cycles in frames.
+
+Signed-off-by: Wenbin Chen <wenbin.chen@intel.com>
+---
+ libavcodec/qsvenc.c      | 11 +++++++++--
+ libavcodec/qsvenc.h      |  1 +
+ libavcodec/qsvenc_h264.c |  3 ++-
+ 3 files changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/libavcodec/qsvenc.c b/libavcodec/qsvenc.c
+index 3c62c2ba64..8c6b31b8cf 100644
+--- a/libavcodec/qsvenc.c
++++ b/libavcodec/qsvenc.c
+@@ -220,8 +220,10 @@ static void dump_video_param(AVCodecContext *avctx, QSVEncContext *q,
+ 
+ #if QSV_HAVE_CO2
+     av_log(avctx, AV_LOG_VERBOSE,
+-           "RecoveryPointSEI: %s IntRefType: %"PRIu16"; IntRefCycleSize: %"PRIu16"; IntRefQPDelta: %"PRId16"\n",
+-           print_threestate(co->RecoveryPointSEI), co2->IntRefType, co2->IntRefCycleSize, co2->IntRefQPDelta);
++           "RecoveryPointSEI: %s IntRefType: %"PRIu16"; IntRefCycleSize: %"PRIu16
++           "; IntRefQPDelta: %"PRId16"; IntRefCycleDist: %"PRId16"\n",
++           print_threestate(co->RecoveryPointSEI), co2->IntRefType, co2->IntRefCycleSize,
++           co2->IntRefQPDelta, co3->IntRefCycleDist);
+ 
+     av_log(avctx, AV_LOG_VERBOSE, "MaxFrameSize: %d; ", co2->MaxFrameSize);
+ #if QSV_HAVE_MAX_SLICE_SIZE
+@@ -822,6 +824,11 @@ FF_ENABLE_DEPRECATION_WARNINGS
+             av_log(avctx, AV_LOG_WARNING, "Please set max_b_frames(-bf) to 0 to enable P-pyramid\n");
+         }
+ 
++        if (avctx->codec_id == AV_CODEC_ID_H264) {
++            if (q->int_ref_cycle_dist)
++                q->extco3.IntRefCycleDist = q->int_ref_cycle_dist;
++        }
++
+         if (avctx->codec_id == AV_CODEC_ID_HEVC) {
+ #if QSV_HAVE_TRANSFORM_SKIP
+             q->extco3.TransformSkip  = q->transform_skip ? MFX_CODINGOPTION_ON : MFX_CODINGOPTION_OFF;
+diff --git a/libavcodec/qsvenc.h b/libavcodec/qsvenc.h
+index 3885512200..26b2936091 100644
+--- a/libavcodec/qsvenc.h
++++ b/libavcodec/qsvenc.h
+@@ -196,6 +196,7 @@ typedef struct QSVEncContext {
+     int int_ref_type;
+     int int_ref_cycle_size;
+     int int_ref_qp_delta;
++    int int_ref_cycle_dist;
+     int recovery_point_sei;
+ 
+     int repeat_pps;
+diff --git a/libavcodec/qsvenc_h264.c b/libavcodec/qsvenc_h264.c
+index 25b87a0506..3d3b8626dd 100644
+--- a/libavcodec/qsvenc_h264.c
++++ b/libavcodec/qsvenc_h264.c
+@@ -125,13 +125,14 @@ static const AVOption options[] = {
+     { "2x"                     , NULL, 0, AV_OPT_TYPE_CONST, { .i64 = MFX_LOOKAHEAD_DS_2x      }, INT_MIN, INT_MAX,     VE, "look_ahead_downsampling" },
+     { "4x"                     , NULL, 0, AV_OPT_TYPE_CONST, { .i64 = MFX_LOOKAHEAD_DS_4x      }, INT_MIN, INT_MAX,     VE, "look_ahead_downsampling" },
+ #endif
+-
+     { "int_ref_type", "Intra refresh type",                                      OFFSET(qsv.int_ref_type),            AV_OPT_TYPE_INT, { .i64 = -1 }, -1, UINT16_MAX, VE, "int_ref_type" },
+         { "none",     NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 0 }, .flags = VE, "int_ref_type" },
+         { "vertical", NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 1 }, .flags = VE, "int_ref_type" },
++        { "horizontal", NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 2 }, .flags = VE, "int_ref_type" },
+     { "int_ref_cycle_size", "Number of frames in the intra refresh cycle",       OFFSET(qsv.int_ref_cycle_size),      AV_OPT_TYPE_INT, { .i64 = -1 },               -1, UINT16_MAX, VE },
+     { "int_ref_qp_delta",   "QP difference for the refresh MBs",                 OFFSET(qsv.int_ref_qp_delta),        AV_OPT_TYPE_INT, { .i64 = INT16_MIN }, INT16_MIN,  INT16_MAX, VE },
+     { "recovery_point_sei", "Insert recovery point SEI messages",                OFFSET(qsv.recovery_point_sei),      AV_OPT_TYPE_INT, { .i64 = -1 },               -1,          1, VE },
++    { "int_ref_cycle_dist",   "Distance between the beginnings of the intra-refresh cycles in frames",  OFFSET(qsv.int_ref_cycle_dist),      AV_OPT_TYPE_INT, { .i64 = -1 }, -1, INT16_MAX, VE },
+ 
+     { "profile", NULL, OFFSET(qsv.profile), AV_OPT_TYPE_INT, { .i64 = MFX_PROFILE_UNKNOWN }, 0, INT_MAX, VE, "profile" },
+     { "unknown" , NULL, 0, AV_OPT_TYPE_CONST, { .i64 = MFX_PROFILE_UNKNOWN      }, INT_MIN, INT_MAX,     VE, "profile" },
+-- 
+2.25.1
+
