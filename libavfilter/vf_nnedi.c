@@ -37,30 +37,19 @@ static const uint8_t NNEDI_XDIM[] = { 8, 16, 32, 48, 8, 16, 32 };
 static const uint8_t NNEDI_YDIM[] = { 6, 6, 6, 6, 4, 4, 4 };
 static const uint16_t NNEDI_NNS[] = { 16, 32, 64, 128, 256 };
 
-static const unsigned NNEDI_DIMS0 = 49 * 4 + 5 * 4 + 9 * 4;
-static const unsigned NNEDI_DIMS0_NEW = 4 * 65 + 4 * 5;
-
-typedef struct PrescreenerOldCoefficients {
-    DECLARE_ALIGNED(32, float, kernel_l0)[4][14 * 4];
-    float bias_l0[4];
+typedef struct PrescreenerCoefficients {
+    DECLARE_ALIGNED(32, float, kernel_l0)[4][16 * 4];
+    DECLARE_ALIGNED(32, float, bias_l0)[4];
 
     DECLARE_ALIGNED(32, float, kernel_l1)[4][4];
-    float bias_l1[4];
+    DECLARE_ALIGNED(32, float, bias_l1)[4];
 
     DECLARE_ALIGNED(32, float, kernel_l2)[4][8];
-    float bias_l2[4];
-} PrescreenerOldCoefficients;
-
-typedef struct PrescreenerNewCoefficients {
-    DECLARE_ALIGNED(32, float, kernel_l0)[4][16 * 4];
-    float bias_l0[4];
-
-    DECLARE_ALIGNED(32, float, kernel_l1)[4][4];
-    float bias_l1[4];
-} PrescreenerNewCoefficients;
+    DECLARE_ALIGNED(32, float, bias_l2)[4];
+} PrescreenerCoefficients;
 
 typedef struct PredictorCoefficients {
-    int xdim, ydim, nns;
+    int xdim, ydim, nns, nsize;
     float *data;
     float *softmax_q1;
     float *elliott_q1;
@@ -92,8 +81,7 @@ typedef struct NNEDIContext {
     int planeheight[4];
     int field_n;
 
-    PrescreenerOldCoefficients prescreener_old;
-    PrescreenerNewCoefficients prescreener_new[3];
+    PrescreenerCoefficients prescreener[4];
     PredictorCoefficients coeffs[2][5][7];
 
     float half;
@@ -111,9 +99,9 @@ typedef struct NNEDIContext {
     int pscrn;
 
     int input_size;
-    uint8_t *prescreen_buf;
-    float *input_buf;
-    float *output_buf;
+    uint8_t **prescreen_buf;
+    float **input_buf;
+    float **output_buf;
 
     void (*read)(const uint8_t *src, float *dst,
                  int src_stride, int dst_stride,
@@ -123,7 +111,8 @@ typedef struct NNEDIContext {
                   int width, int height, int depth, float scale);
     void (*prescreen[2])(AVFilterContext *ctx,
                          const void *src, ptrdiff_t src_stride,
-                         uint8_t *prescreen, int N, void *data);
+                         uint8_t *prescreen, int N,
+                         const PrescreenerCoefficients *const coeffs);
 } NNEDIContext;
 
 #define OFFSET(x) offsetof(NNEDIContext, x)
@@ -225,23 +214,12 @@ static int query_formats(AVFilterContext *ctx)
     return ff_set_common_formats(ctx, fmts_list);
 }
 
-static float dot_dsp(NNEDIContext *s, const float *kernel, const float *input,
-                     unsigned n, float scale, float bias)
+static float dot_dsp(const NNEDIContext *const s, const float *kernel, const float *input,
+                     int n, float scale, float bias)
 {
     float sum;
 
     sum = s->fdsp->scalarproduct_float(kernel, input, n);
-
-    return sum * scale + bias;
-}
-
-static float dot_product(const float *kernel, const float *input,
-                         unsigned n, float scale, float bias)
-{
-    float sum = 0.0f;
-
-    for (int i = 0; i < n; i++)
-        sum += kernel[i] * input[i];
 
     return sum * scale + bias;
 }
@@ -260,10 +238,9 @@ static void transform_elliott(float *input, int size)
 static void process_old(AVFilterContext *ctx,
                         const void *src, ptrdiff_t src_stride,
                         uint8_t *prescreen, int N,
-                        void *data)
+                        const PrescreenerCoefficients *const m_data)
 {
     NNEDIContext *s = ctx->priv;
-    PrescreenerOldCoefficients *m_data = data;
     const float *src_p = src;
 
     // Adjust source pointer to point to top-left of filter window.
@@ -283,12 +260,12 @@ static void process_old(AVFilterContext *ctx,
 
         // Layer 1.
         for (int n = 0; n < 4; n++)
-            state[n + 4] = dot_product(m_data->kernel_l1[n], state, 4, 1.0f, m_data->bias_l1[n]);
+            state[n + 4] = dot_dsp(s, m_data->kernel_l1[n], state, 4, 1.0f, m_data->bias_l1[n]);
         transform_elliott(state + 4, 3);
 
         // Layer 2.
         for (int n = 0; n < 4; n++)
-            state[n + 8] = dot_product(m_data->kernel_l2[n], state, 8, 1.0f, m_data->bias_l2[n]);
+            state[n + 8] = dot_dsp(s, m_data->kernel_l2[n], state, 8, 1.0f, m_data->bias_l2[n]);
 
         prescreen[j] = FFMAX(state[10], state[11]) <= FFMAX(state[8], state[9]) ? 255 : 0;
     }
@@ -297,10 +274,9 @@ static void process_old(AVFilterContext *ctx,
 static void process_new(AVFilterContext *ctx,
                         const void *src, ptrdiff_t src_stride,
                         uint8_t *prescreen, int N,
-                        void *data)
+                        const PrescreenerCoefficients *const m_data)
 {
     NNEDIContext *s = ctx->priv;
-    PrescreenerNewCoefficients *m_data = data;
     const float *src_p = src;
 
     // Adjust source pointer to point to top-left of filter window.
@@ -318,60 +294,68 @@ static void process_new(AVFilterContext *ctx,
         transform_elliott(state, 4);
 
         for (int n = 0; n < 4; n++)
-            state[n + 4] = dot_product(m_data->kernel_l1[n], state, 4, 1.0f, m_data->bias_l1[n]);
+            state[n + 4] = dot_dsp(s, m_data->kernel_l1[n], state, 4, 1.0f, m_data->bias_l1[n]);
 
         for (int n = 0; n < 4; n++)
             prescreen[j + n] = state[n + 4] > 0.f;
     }
 }
 
-static size_t filter_offset(unsigned nn, PredictorCoefficients *model)
+static int filter_offset(int nn, const PredictorCoefficients *const model)
 {
-    return nn * model->xdim * model->ydim;
+    return nn * model->nsize;
 }
 
-static const float *softmax_q1_filter(unsigned nn, PredictorCoefficients *model)
+static const float *softmax_q1_filter(int nn,
+                                      const PredictorCoefficients *const model)
 {
     return model->softmax_q1 + filter_offset(nn, model);
 }
 
-static const float *elliott_q1_filter(unsigned nn, PredictorCoefficients *model)
+static const float *elliott_q1_filter(int nn,
+                                      const PredictorCoefficients *const model)
 {
     return model->elliott_q1 + filter_offset(nn, model);
 }
 
-static const float *softmax_q2_filter(unsigned nn, PredictorCoefficients *model)
+static const float *softmax_q2_filter(int nn,
+                                      const PredictorCoefficients *const model)
 {
     return model->softmax_q2 + filter_offset(nn, model);
 }
 
-static const float *elliott_q2_filter(unsigned nn, PredictorCoefficients *model)
+static const float *elliott_q2_filter(int nn,
+                                      const PredictorCoefficients *const model)
 {
     return model->elliott_q2 + filter_offset(nn, model);
 }
 
 static void gather_input(const float *src, ptrdiff_t src_stride,
                          float *buf, float mstd[4],
-                         PredictorCoefficients *model)
+                         const PredictorCoefficients *const model)
 {
-    float sum = 0;
-    float sum_sq = 0;
+    float sum = 0.f;
+    float sum_sq = 0.f;
     float tmp;
 
     for (int i = 0; i < model->ydim; i++) {
-        for (int j = 0; j < model->xdim; j++) {
-            float val = src[i * src_stride + j];
+        memcpy(buf, src, model->xdim * sizeof(float));
 
-            buf[i * model->xdim + j] = val;
+        for (int j = 0; j < model->xdim; j++) {
+            const float val = src[j];
+
             sum += val;
             sum_sq += val * val;
         }
+
+        src += src_stride;
+        buf += model->xdim;
     }
 
-    mstd[0] = sum / (model->xdim * model->ydim);
+    mstd[0] = sum / model->nsize;
     mstd[3] = 0.f;
 
-    tmp = sum_sq / (model->xdim * model->ydim) - mstd[0] * mstd[0];
+    tmp = sum_sq / model->nsize - mstd[0] * mstd[0];
     if (tmp < FLT_EPSILON) {
         mstd[1] = 0.0f;
         mstd[2] = 0.0f;
@@ -393,7 +377,7 @@ static void transform_softmax_exp(float *input, int size)
 }
 
 static void wae5(const float *softmax, const float *el,
-                 unsigned n, float mstd[4])
+                 int n, float mstd[4])
 {
     float vsum = 0.0f, wsum = 0.0f;
 
@@ -411,17 +395,16 @@ static void wae5(const float *softmax, const float *el,
 static void predictor(AVFilterContext *ctx,
                       const void *src, ptrdiff_t src_stride, void *dst,
                       const uint8_t *prescreen, int N,
-                      void *data, int use_q2)
+                      const PredictorCoefficients *const model, int use_q2)
 {
-    NNEDIContext *s = ctx->priv;
-    PredictorCoefficients *model = data;
+    const NNEDIContext *const s = ctx->priv;
     const float *src_p = src;
     float *dst_p = dst;
 
     // Adjust source pointer to point to top-left of filter window.
     const float *window = src_p - (model->ydim / 2) * src_stride - (model->xdim / 2 - 1);
-    unsigned filter_size = model->xdim * model->ydim;
-    unsigned nns = model->nns;
+    const int filter_size = model->nsize;
+    const int nns = model->nns;
 
     for (int i = 0; i < N; i++) {
         LOCAL_ALIGNED_32(float, input, [48 * 6]);
@@ -439,7 +422,7 @@ static void predictor(AVFilterContext *ctx,
             activation[nn] = dot_dsp(s, softmax_q1_filter(nn, model), input, filter_size, scale, model->softmax_bias_q1[nn]);
 
         for (int nn = 0; nn < nns; nn++)
-            activation[model->nns + nn] = dot_dsp(s, elliott_q1_filter(nn, model), input, filter_size, scale, model->elliott_bias_q1[nn]);
+            activation[nns + nn] = dot_dsp(s, elliott_q1_filter(nn, model), input, filter_size, scale, model->elliott_bias_q1[nn]);
 
         transform_softmax_exp(activation, nns);
         wae5(activation, activation + nns, nns, mstd);
@@ -455,7 +438,7 @@ static void predictor(AVFilterContext *ctx,
             wae5(activation, activation + nns, nns, mstd);
         }
 
-        dst_p[i] = mstd[3] / (use_q2 ? 2 : 1);
+        dst_p[i] = mstd[3] * (use_q2 ? 0.5f : 1.f);
     }
 }
 
@@ -534,7 +517,7 @@ static void write_words(const float *src, uint8_t *dstp,
 }
 
 static void interpolation(const void *src, ptrdiff_t src_stride,
-                          void *dst, const uint8_t *prescreen, unsigned n)
+                          void *dst, const uint8_t *prescreen, int n)
 {
     const float *src_p = src;
     float *dst_p = dst;
@@ -557,7 +540,7 @@ static void interpolation(const void *src, ptrdiff_t src_stride,
 
 static int filter_slice(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs)
 {
-    NNEDIContext *s = ctx->priv;
+    const NNEDIContext *const s = ctx->priv;
     AVFrame *out = s->dst;
     AVFrame *in = s->src;
     const float in_scale = s->in_scale;
@@ -578,10 +561,10 @@ static int filter_slice(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs)
         uint8_t *dst = out->data[p] + slice_start * out->linesize[p];
         const int src_linesize = in->linesize[p];
         const int dst_linesize = out->linesize[p];
-        uint8_t *prescreen_buf = s->prescreen_buf + s->planewidth[0] * jobnr;
-        float *srcbuf = s->input_buf + s->input_size * jobnr;
+        uint8_t *prescreen_buf = s->prescreen_buf[jobnr];
+        float *srcbuf = s->input_buf[jobnr];
         const int srcbuf_stride = width + 64;
-        float *dstbuf = s->output_buf + s->input_size * jobnr;
+        float *dstbuf = s->output_buf[jobnr];
         const int dstbuf_stride = width;
         const int slice_height = (slice_end - slice_start) / 2;
         const int last_slice = slice_end == height;
@@ -652,15 +635,10 @@ static int filter_slice(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs)
                 width, 1, in_scale);
 
         for (int y = 0; y < slice_end - slice_start; y += 2) {
-            if (s->pscrn > 1) {
-                s->prescreen[1](ctx, srcbuf + (y / 2) * srcbuf_stride + 32,
-                                srcbuf_stride, prescreen_buf, width,
-                                &s->prescreener_new[s->pscrn - 2]);
-            } else if (s->pscrn == 1) {
-                s->prescreen[0](ctx, srcbuf + (y / 2) * srcbuf_stride + 32,
-                                srcbuf_stride, prescreen_buf, width,
-                                &s->prescreener_old);
-            }
+            if (s->prescreen > 0)
+                s->prescreen[s->pscrn > 1](ctx, srcbuf + (y / 2) * srcbuf_stride + 32,
+                             srcbuf_stride, prescreen_buf, width,
+                             &s->prescreener[s->pscrn - 1]);
 
             predictor(ctx,
                       srcbuf + (y / 2) * srcbuf_stride + 32,
@@ -816,13 +794,13 @@ static int request_frame(AVFilterLink *link)
     return 0;
 }
 
-static void read(float *dst, size_t n, const float **data)
+static void copy_weights(float *dst, int n, const float **data)
 {
     memcpy(dst, *data, n * sizeof(float));
     *data += n;
 }
 
-static float *allocate(float **ptr, size_t size)
+static float *allocate(float **ptr, int size)
 {
     float *ret = *ptr;
 
@@ -833,17 +811,18 @@ static float *allocate(float **ptr, size_t size)
 
 static int allocate_model(PredictorCoefficients *coeffs, int xdim, int ydim, int nns)
 {
-    size_t filter_size = nns * xdim * ydim;
-    size_t bias_size = nns;
+    int filter_size = nns * xdim * ydim;
+    int bias_size = nns;
     float *data;
 
-    data = av_malloc_array(filter_size + bias_size, 4 * sizeof(float));
+    data = av_calloc(filter_size + bias_size, 4 * sizeof(float));
     if (!data)
         return AVERROR(ENOMEM);
 
     coeffs->data = data;
     coeffs->xdim = xdim;
     coeffs->ydim = ydim;
+    coeffs->nsize = xdim * ydim;
     coeffs->nns  = nns;
 
     coeffs->softmax_q1 = allocate(&data, filter_size);
@@ -864,25 +843,25 @@ static int read_weights(AVFilterContext *ctx, const float *bdata)
     NNEDIContext *s = ctx->priv;
     int ret;
 
-    read(&s->prescreener_old.kernel_l0[0][0], 4 * 48, &bdata);
-    read(s->prescreener_old.bias_l0, 4, &bdata);
+    copy_weights(&s->prescreener[0].kernel_l0[0][0], 4 * 48, &bdata);
+    copy_weights(s->prescreener[0].bias_l0, 4, &bdata);
 
-    read(&s->prescreener_old.kernel_l1[0][0], 4 * 4, &bdata);
-    read(s->prescreener_old.bias_l1, 4, &bdata);
+    copy_weights(&s->prescreener[0].kernel_l1[0][0], 4 * 4, &bdata);
+    copy_weights(s->prescreener[0].bias_l1, 4, &bdata);
 
-    read(&s->prescreener_old.kernel_l2[0][0], 4 * 8, &bdata);
-    read(s->prescreener_old.bias_l2, 4, &bdata);
+    copy_weights(&s->prescreener[0].kernel_l2[0][0], 4 * 8, &bdata);
+    copy_weights(s->prescreener[0].bias_l2, 4, &bdata);
 
     for (int i = 0; i < 3; i++) {
-        PrescreenerNewCoefficients *data = &s->prescreener_new[i];
+        PrescreenerCoefficients *data = &s->prescreener[i + 1];
         float kernel_l0_shuffled[4 * 64];
         float kernel_l1_shuffled[4 * 4];
 
-        read(kernel_l0_shuffled, 4 * 64, &bdata);
-        read(data->bias_l0, 4, &bdata);
+        copy_weights(kernel_l0_shuffled, 4 * 64, &bdata);
+        copy_weights(data->bias_l0, 4, &bdata);
 
-        read(kernel_l1_shuffled, 4 * 4, &bdata);
-        read(data->bias_l1, 4, &bdata);
+        copy_weights(kernel_l1_shuffled, 4 * 4, &bdata);
+        copy_weights(data->bias_l1, 4, &bdata);
 
         for (int n = 0; n < 4; n++) {
             for (int k = 0; k < 64; k++)
@@ -895,34 +874,34 @@ static int read_weights(AVFilterContext *ctx, const float *bdata)
     for (int m = 0; m < 2; m++) {
         // Grouping by neuron count.
         for (int i = 0; i < 5; i++) {
-            int nns = NNEDI_NNS[i];
+            const int nns = NNEDI_NNS[i];
 
             // Grouping by window size.
             for (int j = 0; j < 7; j++) {
                 PredictorCoefficients *model = &s->coeffs[m][i][j];
-                int xdim = NNEDI_XDIM[j];
-                int ydim = NNEDI_YDIM[j];
-                size_t filter_size = xdim * ydim;
+                const int xdim = NNEDI_XDIM[j];
+                const int ydim = NNEDI_YDIM[j];
+                const int filter_size = xdim * ydim;
 
                 ret = allocate_model(model, xdim, ydim, nns);
                 if (ret < 0)
                     return ret;
 
                 // Quality 1 model. NNS[i] * (XDIM[j] * YDIM[j]) * 2 coefficients.
-                read(model->softmax_q1, nns * filter_size, &bdata);
-                read(model->elliott_q1, nns * filter_size, &bdata);
+                copy_weights(model->softmax_q1, nns * filter_size, &bdata);
+                copy_weights(model->elliott_q1, nns * filter_size, &bdata);
 
                 // Quality 1 model bias. NNS[i] * 2 coefficients.
-                read(model->softmax_bias_q1, nns, &bdata);
-                read(model->elliott_bias_q1, nns, &bdata);
+                copy_weights(model->softmax_bias_q1, nns, &bdata);
+                copy_weights(model->elliott_bias_q1, nns, &bdata);
 
                 // Quality 2 model. NNS[i] * (XDIM[j] * YDIM[j]) * 2 coefficients.
-                read(model->softmax_q2, nns * filter_size, &bdata);
-                read(model->elliott_q2, nns * filter_size, &bdata);
+                copy_weights(model->softmax_q2, nns * filter_size, &bdata);
+                copy_weights(model->elliott_q2, nns * filter_size, &bdata);
 
                 // Quality 2 model bias. NNS[i] * 2 coefficients.
-                read(model->softmax_bias_q2, nns, &bdata);
-                read(model->elliott_bias_q2, nns, &bdata);
+                copy_weights(model->softmax_bias_q2, nns, &bdata);
+                copy_weights(model->elliott_bias_q2, nns, &bdata);
             }
         }
     }
@@ -932,7 +911,7 @@ static int read_weights(AVFilterContext *ctx, const float *bdata)
 
 static float mean(const float *input, int size)
 {
-    float sum = 0.;
+    float sum = 0.f;
 
     for (int i = 0; i < size; i++)
         sum += input[i];
@@ -946,7 +925,7 @@ static void transform(float *input, int size, float mean, float half)
         input[i] = (input[i] - mean) / half;
 }
 
-static void subtract_mean_old(PrescreenerOldCoefficients *coeffs, float half)
+static void subtract_mean_old(PrescreenerCoefficients *coeffs, float half)
 {
     for (int n = 0; n < 4; n++) {
         float m = mean(coeffs->kernel_l0[n], 48);
@@ -955,7 +934,7 @@ static void subtract_mean_old(PrescreenerOldCoefficients *coeffs, float half)
     }
 }
 
-static void subtract_mean_new(PrescreenerNewCoefficients *coeffs, float half)
+static void subtract_mean_new(PrescreenerCoefficients *coeffs, float half)
 {
     for (int n = 0; n < 4; n++) {
         float m = mean(coeffs->kernel_l0[n], 64);
@@ -966,13 +945,13 @@ static void subtract_mean_new(PrescreenerNewCoefficients *coeffs, float half)
 
 static void subtract_mean_predictor(PredictorCoefficients *model)
 {
-    size_t filter_size = model->xdim * model->ydim;
+    int filter_size = model->nsize;
     int nns = model->nns;
 
-    float softmax_means[256]; // Average of individual softmax filters.
-    float elliott_means[256]; // Average of individual elliott filters.
-    float mean_filter[48 * 6]; // Pointwise average of all softmax filters.
-    float mean_bias;
+    double softmax_means[256]; // Average of individual softmax filters.
+    double elliott_means[256]; // Average of individual elliott filters.
+    double mean_filter[48 * 6]; // Pointwise average of all softmax filters.
+    double mean_bias;
 
     // Quality 1.
     for (int nn = 0; nn < nns; nn++) {
@@ -997,7 +976,7 @@ static void subtract_mean_predictor(PredictorCoefficients *model)
     }
 
     // Quality 2.
-    memset(mean_filter, 0, 48 * 6 * sizeof(float));
+    memset(mean_filter, 0, sizeof(mean_filter));
 
     for (int nn = 0; nn < nns; nn++) {
         softmax_means[nn] = mean(model->softmax_q2 + nn * filter_size, filter_size);
@@ -1013,8 +992,8 @@ static void subtract_mean_predictor(PredictorCoefficients *model)
 
     mean_bias = mean(model->softmax_bias_q2, nns);
 
-    for (unsigned nn = 0; nn < nns; nn++) {
-        for (unsigned k = 0; k < filter_size; k++) {
+    for (int nn = 0; nn < nns; nn++) {
+        for (int k = 0; k < filter_size; k++) {
             model->softmax_q2[nn * filter_size + k] -= softmax_means[nn] + mean_filter[k];
             model->elliott_q2[nn * filter_size + k] -= elliott_means[nn];
         }
@@ -1126,10 +1105,10 @@ static int config_input(AVFilterLink *inlink)
         break;
     }
 
-    subtract_mean_old(&s->prescreener_old, s->half);
-    subtract_mean_new(&s->prescreener_new[0], s->half);
-    subtract_mean_new(&s->prescreener_new[1], s->half);
-    subtract_mean_new(&s->prescreener_new[2], s->half);
+    subtract_mean_old(&s->prescreener[0], s->half);
+    subtract_mean_new(&s->prescreener[1], s->half);
+    subtract_mean_new(&s->prescreener[2], s->half);
+    subtract_mean_new(&s->prescreener[3], s->half);
 
     s->prescreen[0] = process_old;
     s->prescreen[1] = process_new;
@@ -1141,18 +1120,36 @@ static int config_input(AVFilterLink *inlink)
         }
     }
 
-    s->prescreen_buf = av_calloc(s->nb_threads * s->planewidth[0], sizeof(*s->prescreen_buf));
-    if (!s->prescreen_buf)
-        return AVERROR(ENOMEM);
-
     s->input_size = (s->planewidth[0] + 64) * (s->planeheight[0] + 6);
-    s->input_buf = av_calloc(s->nb_threads * s->input_size, sizeof(*s->input_buf));
+    s->input_buf = av_calloc(s->nb_threads, sizeof(*s->input_buf));
     if (!s->input_buf)
         return AVERROR(ENOMEM);
 
-    s->output_buf = av_calloc(s->nb_threads * s->input_size, sizeof(*s->output_buf));
+    for (int i = 0; i < s->nb_threads; i++) {
+        s->input_buf[i] = av_calloc(s->input_size, sizeof(**s->input_buf));
+        if (!s->input_buf[i])
+            return AVERROR(ENOMEM);
+    }
+
+    s->output_buf = av_calloc(s->nb_threads, sizeof(*s->output_buf));
     if (!s->output_buf)
         return AVERROR(ENOMEM);
+
+    for (int i = 0; i < s->nb_threads; i++) {
+        s->output_buf[i] = av_calloc(s->input_size, sizeof(**s->output_buf));
+        if (!s->output_buf[i])
+            return AVERROR(ENOMEM);
+    }
+
+    s->prescreen_buf = av_calloc(s->nb_threads, sizeof(*s->prescreen_buf));
+    if (!s->prescreen_buf)
+        return AVERROR(ENOMEM);
+
+    for (int i = 0; i < s->nb_threads; i++) {
+        s->prescreen_buf[i] = av_calloc(s->planewidth[0], sizeof(**s->prescreen_buf));
+        if (!s->prescreen_buf[i])
+            return AVERROR(ENOMEM);
+    }
 
     return 0;
 }
@@ -1161,8 +1158,19 @@ static av_cold void uninit(AVFilterContext *ctx)
 {
     NNEDIContext *s = ctx->priv;
 
+    for (int i = 0; i < s->nb_threads && s->prescreen_buf; i++)
+        av_freep(&s->prescreen_buf[i]);
+
     av_freep(&s->prescreen_buf);
+
+    for (int i = 0; i < s->nb_threads && s->input_buf; i++)
+        av_freep(&s->input_buf[i]);
+
     av_freep(&s->input_buf);
+
+    for (int i = 0; i < s->nb_threads && s->output_buf; i++)
+        av_freep(&s->output_buf[i]);
+
     av_freep(&s->output_buf);
     av_freep(&s->fdsp);
 
